@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # 1. Page Config & Layout
-st.set_page_config(layout="wide", page_title="Inventory Simulator")
+st.set_page_config(layout="wide", page_title="Inventory Simulator L1")
 
 # 2. CSS for Pen Tablet Padding
 # Adjust padding-left/right to ensure your zoom tools don't overlap the UI
