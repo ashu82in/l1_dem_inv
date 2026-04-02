@@ -97,11 +97,18 @@ def run_sim(q_val):
             if order[0] <= day:
                 received += order[1]
                 pipeline.remove(order)
+        
         opening = inv
         inv += received
         daily_demand = demand[day]
+        
+        # Calculate unmet demand (shortage)
+        shortage = max(0, daily_demand - inv)
+        met_demand = daily_demand - shortage
+        
         inv = max(0, inv - daily_demand)
         inv_pos = inv + sum(o[1] for o in pipeline)
+        
         placed_qty = 0
         if inv_pos < reorder_point:
             placed_qty = q_val
@@ -113,9 +120,9 @@ def run_sim(q_val):
             "Date": dates[day].date(), 
             "Opening": int(opening), 
             "Demand": int(daily_demand), 
+            "Shortage": int(shortage),
             "Received": int(received), 
             "Physical Inventory": int(inv), 
-            "Pipeline": int(final_pipeline), 
             "Inventory Position": int(inv + final_pipeline), 
             "New Order": int(placed_qty)
         })
@@ -129,12 +136,18 @@ df = run_sim(order_qty)
 h_rate = (holding_cost_pct / 100)
 total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
 
+# Fill Rate Calculation
+total_demand = df["Demand"].sum()
+total_shortage = df["Shortage"].sum()
+fill_rate = ((total_demand - total_shortage) / total_demand * 100) if total_demand > 0 else 100
+
 st.subheader("Inventory KPI Dashboard")
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5) # Expanded to 5 columns
 m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
-m2.metric("Min Inventory", int(df["Physical Inventory"].min()))
-m3.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
-m4.metric("Total Cost", f"${int(total_cost):,}")
+m2.metric("Fill Rate", f"{fill_rate:.1f}%", delta=f"{(fill_rate-100):.1f}%", delta_color="normal" if fill_rate >= 100 else "inverse")
+m3.metric("Min Inventory", int(df["Physical Inventory"].min()))
+m4.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
+m5.metric("Total Cost", f"${int(total_cost):,}")
 st.divider()
 
 # ------------------------------------------------
@@ -155,11 +168,7 @@ reorders = df[df["New Order"] > 0]
 if not reorders.empty:
     fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-if fixed_zero:
-    y_axis_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1])
-else:
-    y_axis_config = dict(rangemode="normal")
-
+y_axis_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1]) if fixed_zero else dict(rangemode="normal")
 fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1), yaxis=y_axis_config)
 st.plotly_chart(fig_inv, use_container_width=True)
 
@@ -176,17 +185,7 @@ st.plotly_chart(px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=[
 st.divider()
 
 # ------------------------------------------------
-# 7. Data Table (Restored)
+# 7. Data Table
 # ------------------------------------------------
 st.subheader("Simulation Data Log")
-
-# Allow user to download the data as CSV
-csv = df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="📥 Download Simulation Data (CSV)",
-    data=csv,
-    file_name='inventory_sim_results.csv',
-    mime='text/csv',
-)
-
 st.dataframe(df, use_container_width=True, hide_index=True)
