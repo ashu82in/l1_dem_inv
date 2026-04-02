@@ -26,7 +26,7 @@ st.markdown(
     
     /* TARGET SIDEBAR BUTTONS SPECIFICALLY */
     section[data-testid="stSidebar"] .stButton button {
-        background-color: #FF9900 !important;
+        background-color: #39FF14  !important;
         color: white !important;
         border: none !important;
         padding: 0.5rem 1rem !important;
