@@ -24,31 +24,34 @@ st.markdown(
         border: 1px solid #333;
     }
     
-    /* TARGET SIDEBAR BUTTONS SPECIFICALLY */
+    /* GREEN BUTTON STYLING (Emerald Shade) */
     section[data-testid="stSidebar"] .stButton button {
-        background-color: #32CD32 !important;
+        background-color: #2E7D32 !important;
         color: white !important;
         border: none !important;
         padding: 0.5rem 1rem !important;
         border-radius: 8px !important;
         width: 100% !important;
         font-weight: bold !important;
+        transition: 0.3s !important;
     }
 
     section[data-testid="stSidebar"] .stButton button:hover {
-        background-color: #32CD32 !important; /* Slightly lighter on hover */
+        background-color: #388E3C !important; /* Slightly lighter green on hover */
         border: none !important;
         color: white !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3) !important;
     }
 
     section[data-testid="stSidebar"] .stButton button:active {
-        background-color: #CC7A00 !important;
+        background-color: #1B5E20 !important;
         color: white !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
+
 st.title("Inventory Policy Simulator")
 
 # ------------------------------------------------
@@ -60,7 +63,7 @@ avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
 num_days = st.sidebar.slider("Simulation Days", 10, 1000, 100)
 
-# This button is now Orange via the CSS above
+# The Green Button
 regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
@@ -160,7 +163,7 @@ m4.metric("Total Cost", f"${int(total_cost):,}")
 st.divider()
 
 # ------------------------------------------------
-# 6. Graphs
+# 6. Graphs (Stacked Vertically)
 # ------------------------------------------------
 
 # --- 1. Inventory Behaviour ---
@@ -170,7 +173,6 @@ fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Phy
 fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
 fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
 
-# Markers
 stockouts = df[df["Physical Inventory"] == 0]
 if not stockouts.empty:
     fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
