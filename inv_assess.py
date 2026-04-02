@@ -145,55 +145,42 @@ m4.metric("Total Cost", f"${int(total_cost):,}")
 
 st.divider()
 
+# --- Main Inventory Chart ---
 st.subheader("Inventory Behaviour")
-fig = go.Figure()
+fig_inv = go.Figure()
 
-# 1. Physical Stock Line
-fig.add_trace(go.Scatter(
-    x=df["Date"], y=df["Physical Inventory"], 
-    name="Physical Stock", line=dict(color='#00CCFF', width=2)
-))
+fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2)))
+fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot', width=1.5)))
+fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="rgba(255, 0, 0, 0.5)", annotation_text="ROP")
 
-# 2. Inventory Position Line
-fig.add_trace(go.Scatter(
-    x=df["Date"], y=df["Inventory Position"], 
-    name="Inventory Position", line=dict(color='#FF9900', dash='dot', width=1.5)
-))
-
-# 3. Reorder Point Horizontal Line
-fig.add_hline(
-    y=reorder_point, line_dash="dash", line_color="rgba(255, 0, 0, 0.5)", 
-    annotation_text=f"ROP: {reorder_point}", annotation_position="bottom right"
-)
-
-# 4. Markers for Stockouts (Red Circles)
+# Markers
 stockouts = df[df["Physical Inventory"] == 0]
 if not stockouts.empty:
-    fig.add_trace(go.Scatter(
-        x=stockouts["Date"], y=stockouts["Physical Inventory"],
-        mode="markers", name="Stockout Event",
-        marker=dict(color="red", size=10, symbol="circle")
-    ))
+    fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
 
-# 5. Markers for Reorder Triggers (Green Triangles)
 reorders = df[df["New Order"] > 0]
 if not reorders.empty:
-    fig.add_trace(go.Scatter(
-        x=reorders["Date"], y=reorders["Physical Inventory"],
-        mode="markers", name="Order Placed",
-        marker=dict(color="#00FF00", size=10, symbol="triangle-up")
-    ))
+    fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-fig.update_layout(
-    hovermode="x unified", 
-    template="plotly_dark", 
-    height=600,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    yaxis=dict(title="Units in Stock", rangemode="tozero"),
-    xaxis=dict(title="Date")
-)
+fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=450, legend=dict(orientation="h", y=1.1))
+st.plotly_chart(fig_inv, use_container_width=True)
 
-st.plotly_chart(fig, use_container_width=True)
+# --- Demand Analysis Section ---
+st.divider()
+st.subheader("Demand Analysis")
+col_plot, col_hist = st.columns(2)
+
+with col_plot:
+    st.write("**Daily Demand Timeline**")
+    fig_dem_line = px.line(df, x="Date", y="Demand", color_discrete_sequence=['#AB63FA'])
+    fig_dem_line.update_layout(template="plotly_dark", height=350)
+    st.plotly_chart(fig_dem_line, use_container_width=True)
+
+with col_hist:
+    st.write("**Demand Frequency (Histogram)**")
+    fig_dem_hist = px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96'])
+    fig_dem_hist.update_layout(template="plotly_dark", height=350, bargap=0.1)
+    st.plotly_chart(fig_dem_hist, use_container_width=True)
 
 st.subheader("Detailed Simulation Log")
 st.dataframe(df, use_container_width=True)
