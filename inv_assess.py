@@ -21,7 +21,7 @@ st.markdown(
     
     /* ZOOM PADDING: Space for Zoom UI on the left */
     section[data-testid="stSidebar"] > div:first-child {
-        padding-left: 2rem !important;
+        padding-left: 3rem !important;
         padding-right: 1rem !important;
     }
 
