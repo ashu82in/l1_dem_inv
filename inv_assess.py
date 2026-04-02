@@ -17,7 +17,7 @@ st.markdown(
     
     /* ZOOM PADDING: Left sidebar buffer */
     section[data-testid="stSidebar"] > div:first-child {
-        padding-left: 2.5rem !important;
+        padding-left: 3.5rem !important;
         padding-right: 1.5rem !important;
     }
 
