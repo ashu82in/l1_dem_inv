@@ -23,6 +23,12 @@ st.markdown(
         border-radius: 10px;
         border: 1px solid #333;
     }
+    /* Style the sidebar button to be more prominent */
+    div.stButton > button:first-child {
+        width: 100%;
+        background-color: #2e2e2e;
+        border: 1px solid #444;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -37,7 +43,12 @@ st.sidebar.header("Simulation Settings")
 
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
+
+# Updated Slider: 10 to 1000, default 100
 num_days = st.sidebar.slider("Simulation Days", 10, 1000, 100)
+
+# New Button in Sidebar to regenerate demand
+regen_button = st.sidebar.button("🔄 Regenerate Demand Scenario")
 
 st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
@@ -50,12 +61,18 @@ holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Demand Generation
+# 3. Demand Generation Logic
 # ------------------------------------------------
 demand_params = f"{avg_demand}_{cov}_{num_days}"
 
-if "last_params" not in st.session_state or st.session_state.last_params != demand_params:
+# Logic: Regenerate if params change OR the sidebar button is clicked
+if (
+    "last_params" not in st.session_state or 
+    st.session_state.last_params != demand_params or 
+    regen_button
+):
     st.session_state.last_params = demand_params
+    
     if cov <= 0:
         st.session_state.demand_seq = np.full(num_days, float(avg_demand))
     else:
@@ -126,7 +143,7 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
 m2.metric("Min Inventory", int(min_inv_level), delta=int(min_inv_level), delta_color="normal" if min_inv_level > 0 else "inverse")
 m3.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
-m4.metric("Total Simulation Cost", f"${int(total_cost):,}")
+m4.metric("Total Cost", f"${int(total_cost):,}")
 
 st.divider()
 
@@ -150,7 +167,7 @@ reorders = df[df["New Order"] > 0]
 if not reorders.empty:
     fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500)
+fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
 st.plotly_chart(fig_inv, use_container_width=True)
 
 st.divider()
