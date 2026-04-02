@@ -9,7 +9,6 @@ import plotly.graph_objects as go
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
-# CSS to prevent overlap with pen tablet/zoom tools
 st.markdown(
     """
     <style>
@@ -120,8 +119,6 @@ h_rate = (holding_cost_pct / 100)
 holding_cost_total = (df["Inventory Position"] * unit_value * h_rate / 365).sum()
 ordering_cost_total = (df["New Order"] > 0).sum() * ordering_cost
 total_cost = holding_cost_total + ordering_cost_total
-
-# New Metric: Minimum Inventory Level
 min_inv_level = df["Physical Inventory"].min()
 
 # EOQ Calculation
@@ -129,7 +126,7 @@ annual_d = avg_demand * 365
 h_unit = unit_value * h_rate
 eoq = int(np.sqrt((2 * annual_d * ordering_cost) / h_unit)) if h_unit > 0 else 0
 
-# Savings logic
+# Comparison for Savings
 df_eoq = run_sim(eoq)
 cost_eoq = (df_eoq["Inventory Position"] * unit_value * h_rate / 365).sum() + \
            (df_eoq["New Order"] > 0).sum() * ordering_cost
@@ -139,37 +136,63 @@ cost_eoq = (df_eoq["Inventory Position"] * unit_value * h_rate / 365).sum() + \
 # ------------------------------------------------
 st.subheader("Inventory KPI Dashboard")
 
-# First row of metrics
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
 m2.metric("Minimum Inventory", int(min_inv_level), 
-          delta=int(min_inv_level - 0), delta_color="normal" if min_inv_level > 0 else "inverse")
+          delta=int(min_inv_level), delta_color="normal" if min_inv_level > 0 else "inverse")
 m3.metric("Average Inventory", int(df["Physical Inventory"].mean()))
 m4.metric("Total Cost", f"${int(total_cost):,}")
-
-# Second row for EOQ
-e1, e2, e3 = st.columns(3)
-e1.metric("EOQ Recommendation", eoq)
-e2.metric("Current Policy Cost", f"${int(total_cost):,}")
-e3.metric("EOQ Potential Savings", f"${max(0, int(total_cost - cost_eoq)):,}")
 
 st.divider()
 
 st.subheader("Inventory Behaviour")
 fig = go.Figure()
-# Physical Stock line
-fig.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
-# Inventory Position line
-fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
-# Reorder Point horizontal line
-fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="Reorder Point")
+
+# 1. Physical Stock Line
+fig.add_trace(go.Scatter(
+    x=df["Date"], y=df["Physical Inventory"], 
+    name="Physical Stock", line=dict(color='#00CCFF', width=2)
+))
+
+# 2. Inventory Position Line
+fig.add_trace(go.Scatter(
+    x=df["Date"], y=df["Inventory Position"], 
+    name="Inventory Position", line=dict(color='#FF9900', dash='dot', width=1.5)
+))
+
+# 3. Reorder Point Horizontal Line
+fig.add_hline(
+    y=reorder_point, line_dash="dash", line_color="rgba(255, 0, 0, 0.5)", 
+    annotation_text=f"ROP: {reorder_point}", annotation_position="bottom right"
+)
+
+# 4. Markers for Stockouts (Red Circles)
+stockouts = df[df["Physical Inventory"] == 0]
+if not stockouts.empty:
+    fig.add_trace(go.Scatter(
+        x=stockouts["Date"], y=stockouts["Physical Inventory"],
+        mode="markers", name="Stockout Event",
+        marker=dict(color="red", size=10, symbol="circle")
+    ))
+
+# 5. Markers for Reorder Triggers (Green Triangles)
+reorders = df[df["New Order"] > 0]
+if not reorders.empty:
+    fig.add_trace(go.Scatter(
+        x=reorders["Date"], y=reorders["Physical Inventory"],
+        mode="markers", name="Order Placed",
+        marker=dict(color="#00FF00", size=10, symbol="triangle-up")
+    ))
 
 fig.update_layout(
     hovermode="x unified", 
     template="plotly_dark", 
-    height=500,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    height=600,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    yaxis=dict(title="Units in Stock", rangemode="tozero"),
+    xaxis=dict(title="Date")
 )
+
 st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("Detailed Simulation Log")
