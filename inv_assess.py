@@ -58,7 +58,7 @@ regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
 st.sidebar.header("Analysis Window")
-window_size = st.sidebar.slider("Window Size (Days)", 1, 30, 7)
+window_size = st.sidebar.slider("Rolling Window Size (Days)", 1, 30, 7)
 
 st.sidebar.divider()
 st.sidebar.header("Chart Settings")
@@ -75,7 +75,7 @@ holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Demand Generation Logic
+# 3. Demand Generation Logic (Persistent State)
 # ------------------------------------------------
 if "demand_seq" not in st.session_state or regen_button:
     if cov <= 0:
@@ -84,6 +84,7 @@ if "demand_seq" not in st.session_state or regen_button:
         st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, avg_demand * cov, num_days)).round()
     st.session_state.demand_dates = pd.date_range(start="2024-01-01", periods=num_days)
 
+# Logic to switch between generated and uploaded
 if st.session_state.get("use_uploaded", False) and "uploaded_demand" in st.session_state:
     current_demand = st.session_state.uploaded_demand
     current_dates = st.session_state.uploaded_dates
@@ -96,7 +97,7 @@ else:
 # ------------------------------------------------
 def run_sim(q_val, d_seq, d_dates):
     inv = opening_balance
-    pipeline = [] 
+    pipeline = [] # List of (arrival_day, qty)
     rows = []
     for day in range(len(d_seq)):
         received = 0
@@ -110,6 +111,7 @@ def run_sim(q_val, d_seq, d_dates):
         shortage = max(0, daily_demand - inv)
         inv = max(0, inv - daily_demand)
         inv_pos = inv + sum(o[1] for o in pipeline)
+        
         placed_qty = 0
         if inv_pos < reorder_point:
             placed_qty = q_val
@@ -130,11 +132,13 @@ df = run_sim(order_qty, current_demand, current_dates)
 # ------------------------------------------------
 tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
+# --- TAB 1: INVENTORY SIMULATOR ---
 with tab1:
     st.title("Inventory Policy Simulator")
     if st.session_state.get("use_uploaded", False):
         st.success("🟢 MODE: Using Uploaded Excel Data")
     
+    # 1. KPIs
     h_rate = (holding_cost_pct / 100)
     total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
     fill_rate = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
@@ -147,27 +151,39 @@ with tab1:
     m5.metric("Total Cost", f"${int(total_cost):,}")
     
     st.divider()
+    
+    # 2. Main Inventory Chart
+    st.subheader("Inventory Levels Over Time")
     fig_inv = go.Figure()
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    stockouts = df[df["Physical Inventory"] == 0]
-    if not stockouts.empty:
-        fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
-    reorders = df[df["New Order"] > 0]
-    if not reorders.empty:
-        fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
-
     y_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1]) if fixed_zero else dict(rangemode="normal")
-    fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1), yaxis=y_config)
+    fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=450, legend=dict(orientation="h", y=1.1), yaxis=y_config)
     st.plotly_chart(fig_inv, use_container_width=True)
+
+    # 3. 1-Day Demand Visuals (As requested)
+    st.divider()
+    st.subheader("Daily Demand Overview")
+    c_line, c_hist = st.columns(2)
+    with c_line:
+        fig_daily_line = px.line(df, x="Date", y="Demand", title="Daily Demand Volatility", color_discrete_sequence=['#AB63FA'])
+        fig_daily_line.update_layout(template="plotly_dark", height=350, yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
+        st.plotly_chart(fig_daily_line, use_container_width=True)
+    with c_hist:
+        fig_daily_hist = px.histogram(df, x="Demand", nbins=20, title="Daily Demand Distribution", color_discrete_sequence=['#00CC96'], marginal="box")
+        fig_daily_hist.update_layout(template="plotly_dark", height=350, bargap=0.1)
+        st.plotly_chart(fig_daily_hist, use_container_width=True)
+
+    st.subheader("Detailed Logs")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+# --- TAB 2: DEMAND ANALYZER ---
 with tab2:
     st.title("Demand & Window Analysis")
     
-    # 1. Management & Upload
+    # 1. Management Section
     c1, c2 = st.columns([2, 1])
     with c1:
         uploaded_file = st.file_uploader("Upload External Demand (Excel/CSV)", type=["xlsx", "csv"])
@@ -186,14 +202,14 @@ with tab2:
 
     st.divider()
 
-    # 2. Rolling Trends & Window Bars
+    # 2. Rolling Trend & Window Bar Chart
+    st.subheader(f"Rolling {window_size}-Day Trend")
     df['Rolling Mean'] = df['Demand'].rolling(window=window_size).mean()
-    df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum() # For window-based analysis
+    df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum()
     
-    st.subheader(f"Rolling {window_size}-Day Trend (Average)")
     fig_roll = go.Figure()
     fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Demand"], name="Daily Demand", line=dict(color='rgba(171, 99, 250, 0.2)')))
-    fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Rolling Mean"], name="Rolling Avg", line=dict(color='#AB63FA', width=3)))
+    fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Rolling Mean"], name="Rolling Average", line=dict(color='#AB63FA', width=3)))
     fig_roll.update_layout(template="plotly_dark", height=400, hovermode="x unified", yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig_roll, use_container_width=True)
 
@@ -206,18 +222,15 @@ with tab2:
 
     st.divider()
 
-    # 3. Dynamic Histogram (Daily vs Rolling Window)
+    # 3. Dynamic Histogram & Risk Exposure (考慮到 Window)
     st.subheader("Service Level & Safety Stock Analysis")
     h_col, s_col = st.columns([1, 2])
     with h_col:
-        # User explicitly chooses Daily vs Window-based Sum for the distribution
         hist_mode = st.radio("Select Distribution Focus:", ["Daily Demand", f"{window_size}-Day Window Demand"])
     with s_col:
         target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
 
-    # Use Daily demand or the Rolling Sum (Total demand over the window)
     hist_data = df["Demand"] if hist_mode == "Daily Demand" else df["Rolling Sum"].dropna()
-    
     cutoff = np.percentile(hist_data, target_sl * 100)
     max_val = hist_data.max()
     exposure_gap = max_val - cutoff
@@ -233,5 +246,5 @@ with tab2:
     fig_hist.update_layout(template="plotly_dark", height=450, bargap=0.1, xaxis_title=f"Units ({hist_mode})")
     st.plotly_chart(fig_hist, use_container_width=True)
     
-    st.info(f"💡 **Manager's Insight:** By planning for a {int(target_sl*100)}% service level on **{hist_mode}**, you cover demand up to **{int(cutoff)} units**. "
-            f"The remaining gap to the maximum (**{int(exposure_gap)} units**) is the risk you are accepting to optimize inventory costs.")
+    st.info(f"📈 **Service Level Concept:** This threshold covers **{int(target_sl*100)}% of demand occurrences**. "
+            f"The **{int(exposure_gap)} unit gap** to the Maximum is the risk accepted to optimize inventory.")
