@@ -17,8 +17,8 @@ st.markdown(
     
     /* ZOOM PADDING: Left sidebar buffer */
     section[data-testid="stSidebar"] > div:first-child {
-        padding-left: 3.5rem !important;
-        # padding-right: 1.5rem !important;
+        padding-left: 2.5rem !important;
+        padding-right: 1.5rem !important;
     }
 
     .stMetric {
@@ -71,7 +71,7 @@ holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Demand Generation Logic (Reactive)
+# 3. Demand Generation Logic
 # ------------------------------------------------
 demand_state_key = f"{avg_demand}_{cov}_{num_days}"
 
@@ -91,7 +91,7 @@ else:
     current_dates = st.session_state.demand_dates
 
 # ------------------------------------------------
-# 4. Simulation Engine
+# 4. Simulation Engine (Enhanced for Lead Time tracking)
 # ------------------------------------------------
 def run_sim(q_val, d_seq, d_dates):
     inv = opening_balance
@@ -103,9 +103,14 @@ def run_sim(q_val, d_seq, d_dates):
             if order[0] <= day:
                 received += order[1]
                 pipeline.remove(order)
+        
         opening = inv
         inv += received
         daily_demand = d_seq[day]
+        
+        # Determine if we are currently in a Lead Time period (waiting for stock)
+        is_in_lead_time = len(pipeline) > 0
+        
         shortage = max(0, daily_demand - inv)
         inv = max(0, inv - daily_demand)
         inv_pos = inv + sum(o[1] for o in pipeline)
@@ -118,8 +123,9 @@ def run_sim(q_val, d_seq, d_dates):
         
         rows.append({
             "Date": d_dates[day], "Opening": int(opening), "Demand": int(daily_demand), 
-            "Shortage": int(shortage), "Received": int(received), "Physical Inventory": int(inv), 
-            "Inventory Position": int(inv + sum(o[1] for o in pipeline)), "New Order": int(placed_qty)
+            "Shortage": int(shortage), "In Lead Time": is_in_lead_time, "Received": int(received), 
+            "Physical Inventory": int(inv), "Inventory Position": int(inv_pos + placed_qty), 
+            "New Order": int(placed_qty)
         })
     return pd.DataFrame(rows)
 
@@ -134,28 +140,43 @@ tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 with tab1:
     st.title("Inventory Policy Simulator")
     
-    # KPIs
+    # KPIs including Lead Time Fill Rate
     h_rate = (holding_cost_pct / 100)
     total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
-    fill_rate = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
+    
+    global_fr = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
+    
+    # Lead Time Fill Rate Calculation
+    lt_df = df[df["In Lead Time"] == True]
+    if not lt_df.empty and lt_df["Demand"].sum() > 0:
+        lt_fr = ((lt_df["Demand"].sum() - lt_df["Shortage"].sum()) / lt_df["Demand"].sum() * 100)
+    else:
+        lt_fr = 100.0
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
-    m2.metric("Fill Rate", f"{fill_rate:.1f}%")
-    m3.metric("Min Inventory", int(df["Physical Inventory"].min()))
-    m4.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
-    m5.metric("Total Cost", f"${int(total_cost):,}")
+    m2.metric("Global Fill Rate", f"{global_fr:.1f}%")
+    m3.metric("Lead Time Fill Rate", f"{lt_fr:.1f}%", help="Fill rate specifically during the 'Danger Zone' (waiting for replenishment)")
+    m4.metric("Min Inventory", int(df["Physical Inventory"].min()))
+    m5.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
+    m6.metric("Total Cost", f"${int(total_cost):,}")
     
     st.divider()
     
-    # 1. Main Inventory Chart
-    st.subheader("Inventory Levels Over Time")
+    # Main Inventory Chart
+    st.subheader("Inventory Levels & Replenishment Danger Zones")
     fig_inv = go.Figure()
+    
+    # Highlight Lead Time Zones
+    for i, row in df.iterrows():
+        if row["In Lead Time"]:
+            fig_inv.add_vrect(x0=row["Date"], x1=row["Date"], fillcolor="red", opacity=0.1, layer="below", line_width=0)
+
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Event Markers
+    # Markers
     s_df = df[df["Physical Inventory"] == 0]
     if not s_df.empty: fig_inv.add_trace(go.Scatter(x=s_df["Date"], y=s_df["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10, symbol="x")))
     o_df = df[df["New Order"] > 0]
@@ -165,7 +186,7 @@ with tab1:
     fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=450, legend=dict(orientation="h", y=1.1), yaxis=y_config)
     st.plotly_chart(fig_inv, use_container_width=True)
 
-    # 2. Daily Demand Context
+    # Daily Demand Context
     st.divider()
     st.subheader("Daily Demand Data Overview")
     c1, c2 = st.columns(2)
@@ -174,8 +195,6 @@ with tab1:
     with c2:
         st.plotly_chart(px.histogram(df, x="Demand", nbins=20, title="Daily Demand Distribution", color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=300, bargap=0.1), use_container_width=True)
 
-    # 3. THE DATA TABLE (RESTORED HERE)
-    st.divider()
     st.subheader("Detailed Simulation Logs")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -194,13 +213,12 @@ with tab2:
             st.success("File Ready!")
     with cb:
         st.toggle("Activate Uploaded Data", key="use_uploaded")
-        st.write("Column Requirement: 'Date' & 'Demand'")
+        st.write("Columns: 'Date' & 'Demand'")
 
     st.divider()
 
     # Rolling Trends
     df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum()
-    
     st.subheader(f"Total Demand in {window_size}-Day Blocks")
     df['Window_Group'] = np.arange(len(df)) // window_size
     window_totals = df.groupby('Window_Group').agg({'Demand': 'sum', 'Date': 'first'}).reset_index()
