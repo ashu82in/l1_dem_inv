@@ -24,32 +24,31 @@ st.markdown(
         border: 1px solid #333;
     }
     
-    /* ORANGE BUTTON STYLING */
-    div.stSidebar [data-testid="stButton"] button {
-        background-color: #FF9900;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        width: 100%;
-        font-weight: bold;
-        transition: 0.3s;
+    /* TARGET SIDEBAR BUTTONS SPECIFICALLY */
+    section[data-testid="stSidebar"] .stButton button {
+        background-color: #FF9900 !important;
+        color: white !important;
+        border: none !important;
+        padding: 0.5rem 1rem !important;
+        border-radius: 8px !important;
+        width: 100% !important;
+        font-weight: bold !important;
     }
-    
-    div.stSidebar [data-testid="stButton"] button:hover {
-        background-color: #e68a00;
-        border: none;
-        color: white;
+
+    section[data-testid="stSidebar"] .stButton button:hover {
+        background-color: #FFB347 !important; /* Slightly lighter on hover */
+        border: none !important;
+        color: white !important;
     }
-    
-    div.stSidebar [data-testid="stButton"] button:active {
-        background-color: #cc7a00;
-        color: white;
+
+    section[data-testid="stSidebar"] .stButton button:active {
+        background-color: #CC7A00 !important;
+        color: white !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
-
 st.title("Inventory Policy Simulator")
 
 # ------------------------------------------------
