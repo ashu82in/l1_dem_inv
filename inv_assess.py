@@ -26,7 +26,7 @@ st.markdown(
     
     /* TARGET SIDEBAR BUTTONS SPECIFICALLY */
     section[data-testid="stSidebar"] .stButton button {
-        background-color: #39FF14  !important;
+        background-color: #32CD32 !important;
         color: white !important;
         border: none !important;
         padding: 0.5rem 1rem !important;
@@ -36,7 +36,7 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] .stButton button:hover {
-        background-color: #39FF14 !important; /* Slightly lighter on hover */
+        background-color: #32CD32 !important; /* Slightly lighter on hover */
         border: none !important;
         color: white !important;
     }
