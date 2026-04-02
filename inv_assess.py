@@ -84,7 +84,6 @@ if "demand_seq" not in st.session_state or regen_button:
         st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, avg_demand * cov, num_days)).round()
     st.session_state.demand_dates = pd.date_range(start="2024-01-01", periods=num_days)
 
-# Toggle between generated and uploaded
 if st.session_state.get("use_uploaded", False) and "uploaded_demand" in st.session_state:
     current_demand = st.session_state.uploaded_demand
     current_dates = st.session_state.uploaded_dates
@@ -127,11 +126,10 @@ def run_sim(q_val, d_seq, d_dates):
 df = run_sim(order_qty, current_demand, current_dates)
 
 # ------------------------------------------------
-# 5. Tabs Navigation
+# 5. Tabs Layout
 # ------------------------------------------------
 tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
-# --- TAB 1: INVENTORY SIMULATOR ---
 with tab1:
     st.title("Inventory Policy Simulator")
     if st.session_state.get("use_uploaded", False):
@@ -154,7 +152,6 @@ with tab1:
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Event Markers
     stockouts = df[df["Physical Inventory"] == 0]
     if not stockouts.empty:
         fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
@@ -167,11 +164,10 @@ with tab1:
     st.plotly_chart(fig_inv, use_container_width=True)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-# --- TAB 2: DEMAND ANALYZER ---
 with tab2:
     st.title("Demand & Window Analysis")
     
-    # 1. Management Section
+    # 1. Management & Upload
     c1, c2 = st.columns([2, 1])
     with c1:
         uploaded_file = st.file_uploader("Upload External Demand (Excel/CSV)", type=["xlsx", "csv"])
@@ -190,13 +186,14 @@ with tab2:
 
     st.divider()
 
-    # 2. Rolling Trend & Window Bar Chart
-    st.subheader(f"Rolling {window_size}-Day Trends")
+    # 2. Rolling Trends & Window Bars
     df['Rolling Mean'] = df['Demand'].rolling(window=window_size).mean()
+    df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum() # For window-based analysis
     
+    st.subheader(f"Rolling {window_size}-Day Trend (Average)")
     fig_roll = go.Figure()
     fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Demand"], name="Daily Demand", line=dict(color='rgba(171, 99, 250, 0.2)')))
-    fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Rolling Mean"], name="Rolling Average", line=dict(color='#AB63FA', width=3)))
+    fig_roll.add_trace(go.Scatter(x=df["Date"], y=df["Rolling Mean"], name="Rolling Avg", line=dict(color='#AB63FA', width=3)))
     fig_roll.update_layout(template="plotly_dark", height=400, hovermode="x unified", yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig_roll, use_container_width=True)
 
@@ -209,29 +206,32 @@ with tab2:
 
     st.divider()
 
-    # 3. Dynamic Histogram & Risk Exposure
+    # 3. Dynamic Histogram (Daily vs Rolling Window)
     st.subheader("Service Level & Safety Stock Analysis")
     h_col, s_col = st.columns([1, 2])
     with h_col:
-        hist_mode = st.radio("Select Distribution Focus:", ["Daily Demand", "Rolling Demand"])
+        # User explicitly chooses Daily vs Window-based Sum for the distribution
+        hist_mode = st.radio("Select Distribution Focus:", ["Daily Demand", f"{window_size}-Day Window Demand"])
     with s_col:
         target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
 
-    hist_data = df["Demand"] if hist_mode == "Daily Demand" else df["Rolling Mean"].dropna()
+    # Use Daily demand or the Rolling Sum (Total demand over the window)
+    hist_data = df["Demand"] if hist_mode == "Daily Demand" else df["Rolling Sum"].dropna()
+    
     cutoff = np.percentile(hist_data, target_sl * 100)
     max_val = hist_data.max()
     exposure_gap = max_val - cutoff
 
     r1, r2, r3 = st.columns(3)
     r1.metric(f"{int(target_sl*100)}% SL Threshold", int(cutoff))
-    r2.metric("Absolute Maximum Demand", int(max_val))
+    r2.metric(f"Max {hist_mode}", int(max_val))
     r3.metric("Uncovered Risk Gap", int(exposure_gap), delta="Exposure", delta_color="inverse")
 
     fig_hist = px.histogram(hist_data, nbins=30, color_discrete_sequence=['#00CC96'], marginal="box")
     fig_hist.add_vline(x=cutoff, line_dash="dash", line_color="red", annotation_text=f"{int(target_sl*100)}% SL")
     fig_hist.add_vline(x=max_val, line_dash="dot", line_color="yellow", annotation_text="MAX")
-    fig_hist.update_layout(template="plotly_dark", height=450, bargap=0.1, xaxis_title=hist_mode)
+    fig_hist.update_layout(template="plotly_dark", height=450, bargap=0.1, xaxis_title=f"Units ({hist_mode})")
     st.plotly_chart(fig_hist, use_container_width=True)
     
-    st.warning(f"⚠️ **Risk Exposure Alert:** At a **{int(target_sl*100)}% Service Level**, the threshold is **{int(cutoff)} units**. This means {int(target_sl*100)}% of demand is covered. "
-               f"However, there is a gap of **{int(exposure_gap)} units** between this threshold and the maximum demand recorded. You must decide if covering this extreme gap is worth the inventory cost.")
+    st.info(f"💡 **Manager's Insight:** By planning for a {int(target_sl*100)}% service level on **{hist_mode}**, you cover demand up to **{int(cutoff)} units**. "
+            f"The remaining gap to the maximum (**{int(exposure_gap)} units**) is the risk you are accepting to optimize inventory costs.")
