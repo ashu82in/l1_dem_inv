@@ -19,7 +19,7 @@ st.markdown(
         padding-top: 2rem;
     }
     
-    /* ZOOM PADDING for Sidebar */
+    /* ZOOM PADDING: Space for Zoom UI on the left */
     section[data-testid="stSidebar"] > div:first-child {
         padding-left: 2rem !important;
         padding-right: 1rem !important;
@@ -48,17 +48,16 @@ st.markdown(
 )
 
 # ------------------------------------------------
-# 2. Sidebar Inputs
+# 2. Sidebar Inputs (Universal Settings)
 # ------------------------------------------------
 st.sidebar.header("Simulation Settings")
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
-num_days = st.sidebar.slider("Simulation Horizon (Total Days)", 10, 1000, 100)
+num_days = st.sidebar.slider("Simulation Horizon (Days)", 10, 1000, 100)
 regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
 st.sidebar.header("Analysis Window")
-# NEW: Slider to choose the window size (e.g., 5 days, 7 days)
 window_size = st.sidebar.slider("Rolling Window Size (Days)", 1, 30, 5)
 
 st.sidebar.divider()
@@ -76,30 +75,24 @@ holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Demand Logic
+# 3. Demand Logic (Session State Management)
 # ------------------------------------------------
-st.sidebar.divider()
-data_source = st.sidebar.radio("Demand Source", ["Generated", "Excel Upload"])
-
-if data_source == "Generated":
-    demand_params = f"{avg_demand}_{cov}_{num_days}"
-    if "last_params" not in st.session_state or st.session_state.last_params != demand_params or regen_button:
-        st.session_state.last_params = demand_params
-        if cov <= 0:
-            st.session_state.demand_seq = np.full(num_days, float(avg_demand))
-        else:
-            std_dev = avg_demand * cov
-            st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, std_dev, num_days)).round()
-    
-    final_demand = st.session_state.demand_seq
-    final_dates = pd.date_range(start="2024-01-01", periods=num_days)
-else:
-    if "uploaded_demand" in st.session_state:
-        final_demand = st.session_state.uploaded_demand
-        final_dates = st.session_state.uploaded_dates
+# Initialize demand if not present
+if "demand_seq" not in st.session_state or regen_button:
+    if cov <= 0:
+        st.session_state.demand_seq = np.full(num_days, float(avg_demand))
     else:
-        final_demand = np.zeros(10)
-        final_dates = pd.date_range(start="2024-01-01", periods=10)
+        st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, avg_demand * cov, num_days)).round()
+    st.session_state.demand_dates = pd.date_range(start="2024-01-01", periods=num_days)
+
+# Default to Generated
+current_demand = st.session_state.demand_seq
+current_dates = st.session_state.demand_dates
+
+# Check if Tab 2 has "Activated" the uploaded data
+if st.session_state.get("use_uploaded", False) and "uploaded_demand" in st.session_state:
+    current_demand = st.session_state.uploaded_demand
+    current_dates = st.session_state.uploaded_dates
 
 # ------------------------------------------------
 # 4. Simulation Engine
@@ -133,15 +126,23 @@ def run_sim(q_val, d_seq, d_dates):
         })
     return pd.DataFrame(rows)
 
-df = run_sim(order_qty, final_demand, final_dates)
+df = run_sim(order_qty, current_demand, current_dates)
 
 # ------------------------------------------------
 # 5. Tabs
 # ------------------------------------------------
 tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
+# TAB 1: SIMULATOR
 with tab1:
     st.title("Inventory Policy Simulator")
+    
+    # Status Indicator
+    if st.session_state.get("use_uploaded", False):
+        st.success("🟢 Currently using: Uploaded Excel Data")
+    else:
+        st.info("🔵 Currently using: Generated Synthetic Demand")
+
     h_rate = (holding_cost_pct / 100)
     total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
     fill_rate = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
@@ -165,59 +166,65 @@ with tab1:
     st.plotly_chart(fig_inv, use_container_width=True)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+# TAB 2: DEMAND ANALYZER (Includes Upload)
 with tab2:
     st.title("Demand & Window Analysis")
     
-    # --- DATA UPLOAD SECTION ---
-    if data_source == "Excel Upload":
-        uploaded_file = st.file_uploader("Upload Excel/CSV", type=["xlsx", "csv"])
+    # --- UPLOAD SECTION ---
+    st.subheader("Data Source Management")
+    c1, c2 = st.columns([2, 1])
+    
+    with c1:
+        uploaded_file = st.file_uploader("Upload Excel/CSV (Required Columns: Date, Demand)", type=["xlsx", "csv"])
         if uploaded_file:
             u_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-            u_df['Date'] = pd.to_datetime(u_df['Date'])
-            st.session_state.uploaded_demand = u_df['Demand'].values
-            st.session_state.uploaded_dates = u_df['Date'].values
-            st.rerun()
+            try:
+                u_df['Date'] = pd.to_datetime(u_df['Date'])
+                st.session_state.uploaded_demand = u_df['Demand'].values
+                st.session_state.uploaded_dates = u_df['Date'].values
+                st.success("File Processed! Use the toggle on the right to apply it.")
+            except Exception as e:
+                st.error(f"Format Error: Ensure 'Date' and 'Demand' columns exist. {e}")
+
+    with c2:
+        st.write("**Switch Data Source**")
+        st.toggle("Use Uploaded Data in Simulator", key="use_uploaded", value=False)
+        
+        # Download Template
+        template_df = pd.DataFrame({"Date": ["2024-01-01", "2024-01-02"], "Demand": [25, 30]})
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            template_df.to_excel(writer, index=False)
+        st.download_button("📥 Download Template", data=buffer.getvalue(), file_name="demand_template.xlsx")
+
+    st.divider()
 
     # --- ROLLING WINDOW ANALYSIS ---
-    st.subheader(f"Rolling {window_size}-Day Demand Analysis")
-    
-    # Calculate Rolling Metrics
+    st.subheader(f"Rolling {window_size}-Day Trends")
     df['Rolling Mean'] = df['Demand'].rolling(window=window_size).mean()
-    df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum()
-
-    st.write(f"This graph shows the **Actual Daily Demand** vs the **{window_size}-Day Moving Average**.")
     
     fig_rolling = go.Figure()
-    fig_rolling.add_trace(go.Scatter(x=df["Date"], y=df["Demand"], name="Daily Demand", line=dict(color='rgba(171, 99, 250, 0.3)')))
+    fig_rolling.add_trace(go.Scatter(x=df["Date"], y=df["Demand"], name="Daily Demand", line=dict(color='rgba(171, 99, 250, 0.2)')))
     fig_rolling.add_trace(go.Scatter(x=df["Date"], y=df["Rolling Mean"], name=f"{window_size}-Day Rolling Avg", line=dict(color='#AB63FA', width=3)))
-    
     fig_rolling.update_layout(template="plotly_dark", height=400, hovermode="x unified", yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig_rolling, use_container_width=True)
 
-    # --- WINDOW-WISE TOTALS ---
-    st.divider()
-    st.subheader(f"Total Demand per {window_size}-Day Window")
-    
-    # Create chunks for window-wise bars
+    # --- WINDOW-WISE BAR CHART ---
+    st.subheader(f"Demand Volume by {window_size}-Day Blocks")
     df['Window_Group'] = np.arange(len(df)) // window_size
     window_totals = df.groupby('Window_Group').agg({'Demand': 'sum', 'Date': 'first'}).reset_index()
-
-    fig_window_bar = px.bar(window_totals, x='Date', y='Demand', 
-                             title=f"Total Demand in Each {window_size}-Day Block",
-                             labels={'Demand': 'Total Window Demand'},
-                             color_discrete_sequence=['#00CC96'])
+    fig_window_bar = px.bar(window_totals, x='Date', y='Demand', color_discrete_sequence=['#00CC96'])
     fig_window_bar.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_window_bar, use_container_width=True)
 
     st.divider()
     
-    # --- DISTRIBUTION ANALYSIS ---
-    st.subheader("Statistical Distribution")
-    s1, s2, s3 = st.columns(3)
-    s1.metric("Max Daily Demand", int(df["Demand"].max()))
-    s2.metric("Avg Daily Demand", round(df["Demand"].mean(), 1))
-    s3.metric("Actual CoV", round(df["Demand"].std() / df["Demand"].mean(), 2) if df["Demand"].mean() > 0 else 0)
-
+    # --- STATISTICS ---
+    st.subheader("Safety Stock & Service Levels")
+    desired_sl = st.select_slider("Target Service Level", options=[0.80, 0.90, 0.95, 0.99], value=0.95)
+    service_cutoff = np.percentile(df["Demand"], desired_sl * 100)
+    
     fig_hist = px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96'], marginal="box")
+    fig_hist.add_vline(x=service_cutoff, line_dash="dash", line_color="red", annotation_text=f"{int(desired_sl*100)}% Service Level")
     fig_hist.update_layout(template="plotly_dark", height=400, bargap=0.1)
     st.plotly_chart(fig_hist, use_container_width=True)
