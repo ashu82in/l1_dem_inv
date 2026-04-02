@@ -4,18 +4,24 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-# 1. Page Config & Layout
-st.set_page_config(layout="wide", page_title="Inventory Simulator L1")
+# ------------------------------------------------
+# 1. Page Config & Custom Side Padding
+# ------------------------------------------------
+st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
-# 2. CSS for Pen Tablet Padding
-# Adjust padding-left/right to ensure your zoom tools don't overlap the UI
+# CSS to prevent overlap with pen tablet/zoom tools
 st.markdown(
     """
     <style>
     .block-container {
-        padding-left: 6rem;
-        padding-right: 6rem;
+        padding-left: 5rem;
+        padding-right: 5rem;
         padding-top: 2rem;
+    }
+    .stMetric {
+        background-color: #1e1e1e;
+        padding: 15px;
+        border-radius: 10px;
     }
     </style>
     """,
@@ -25,151 +31,131 @@ st.markdown(
 st.title("Inventory Policy Simulator - L1")
 
 # ------------------------------------------------
-# Sidebar Inputs
+# 2. Sidebar Inputs
 # ------------------------------------------------
-st.sidebar.header("Inventory Inputs")
+st.sidebar.header("Simulation Settings")
 
-opening_balance = st.sidebar.number_input("Opening Balance", value=500)
+# Using a unique key for inputs to track changes
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
-cov = st.sidebar.number_input("Coefficient of Variation", value=0.8)
+cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
+num_days = st.sidebar.slider("Simulation Days", 100, 1000, 365)
+
+st.sidebar.divider()
+st.sidebar.header("Policy & Costs")
+opening_balance = st.sidebar.number_input("Opening Balance", value=500)
 lead_time = st.sidebar.number_input("Lead Time (Days)", value=3, min_value=0)
-reorder_point = st.sidebar.number_input("Reorder Point", value=200)
-order_qty = st.sidebar.number_input("Order Quantity", value=300)
-unit_value = st.sidebar.number_input("Value Per Unit", value=100)
-holding_cost_percent = st.sidebar.number_input("Holding Cost (% of Value/Year)", value=20.0)
-ordering_cost = st.sidebar.number_input("Ordering Cost Per Order", value=500)
-num_days = st.sidebar.slider("Simulation Days", 100, 2000, 365)
+reorder_point = st.sidebar.number_input("Reorder Point (ROP)", value=200)
+order_qty = st.sidebar.number_input("Order Quantity (Q)", value=300)
+unit_value = st.sidebar.number_input("Value Per Unit ($)", value=100)
+holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
+ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
-holding_cost_rate = holding_cost_percent / 100
+# ------------------------------------------------
+# 3. Reactive Demand Generation (Fixes CoV Issue)
+# ------------------------------------------------
+# Logic: Only regenerate if specific params change
+demand_params = f"{avg_demand}_{cov}_{num_days}"
 
-# Reset Logic
-if "demand_sequence" not in st.session_state or st.sidebar.button("Reset Demand"):
-    std_demand = avg_demand * cov
-    st.session_state.demand_sequence = np.maximum(
-        0, np.random.normal(avg_demand, std_demand, num_days)
-    ).round()
+if "last_params" not in st.session_state or st.session_state.last_params != demand_params:
+    st.session_state.last_params = demand_params
+    if cov <= 0:
+        # Perfectly constant demand
+        st.session_state.demand_seq = np.full(num_days, float(avg_demand))
+    else:
+        # Stochastic demand
+        std_dev = avg_demand * cov
+        st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, std_dev, num_days)).round()
 
-demand = st.session_state.demand_sequence
+demand = st.session_state.demand_seq
 dates = pd.date_range(start="2024-01-01", periods=num_days)
 
 # ------------------------------------------------
-# Inventory Simulation (Logic Fixed for Lead Time 0)
+# 4. Simulation Engine (Fixes Lead Time 0 Issue)
 # ------------------------------------------------
-def run_simulation(sim_order_qty):
+def run_sim(q_val):
     inv = opening_balance
-    pipeline = [] # List of (arrival_day, quantity)
-    sim_data = []
+    pipeline = [] # Stores (delivery_day, qty)
+    rows = []
 
     for day in range(num_days):
-        # 1. Process Arrivals
-        shipment_received = 0
-        for order in pipeline.copy():
+        # A. Receive Shipments
+        received = 0
+        for order in pipeline[:]:
             if order[0] <= day:
-                shipment_received += order[1]
+                received += order[1]
                 pipeline.remove(order)
-
+        
+        # B. Update Inventory
         opening = inv
-        inv += shipment_received
+        inv += received
+        daily_demand = demand[day]
+        inv = max(0, inv - daily_demand)
         
-        # 2. Daily Demand
-        demand_today = demand[day]
-        inv = max(0, inv - demand_today)
-
-        # 3. Check Inventory Position (On Hand + In Pipeline)
-        pipeline_qty = sum(q for d, q in pipeline)
-        inv_position = inv + pipeline_qty
-
-        # 4. Reorder Logic
-        new_order_amt = 0
+        # C. Calculate Position & Trigger Order
+        current_pipeline_qty = sum(o[1] for o in pipeline)
+        inv_position = inv + current_pipeline_qty
+        
+        placed_qty = 0
         if inv_position < reorder_point:
-            new_order_amt = sim_order_qty
+            placed_qty = q_val
             if lead_time == 0:
-                inv += new_order_amt # Instant arrival
+                inv += placed_qty # Instant arrival for LT=0
             else:
-                pipeline.append((day + lead_time, new_order_amt))
+                pipeline.append((day + lead_time, placed_qty))
         
-        # Re-calculate pipeline for data log
-        current_pipeline_total = sum(q for d, q in pipeline)
+        # Recalculate pipeline for logging
+        final_pipeline = sum(o[1] for o in pipeline)
         
-        sim_data.append({
+        rows.append({
             "Date": dates[day],
-            "Opening Balance": opening,
-            "Demand": demand_today,
-            "Shipment Received": shipment_received,
-            "Pipeline Order": current_pipeline_total,
-            "Inventory Position": inv + current_pipeline_total,
-            "New Order": new_order_amt,
-            "Closing Balance": inv,
-            "Total Inventory": inv + current_pipeline_total
+            "Opening": opening,
+            "Demand": daily_demand,
+            "Received": received,
+            "Physical Inventory": inv,
+            "Pipeline": final_pipeline,
+            "Inventory Position": inv + final_pipeline,
+            "New Order": placed_qty
         })
-    return pd.DataFrame(sim_data)
+    return pd.DataFrame(rows)
 
-df = run_simulation(order_qty)
+df = run_sim(order_qty)
 
 # ------------------------------------------------
-# KPI Calculations
+# 5. KPIs & Economics
 # ------------------------------------------------
-stockout_days = (df["Closing Balance"] == 0).sum()
-avg_inv = df["Total Inventory"].mean()
-avg_age = avg_inv / df["Demand"].mean() if df["Demand"].mean() > 0 else 0
-df["Blocked WC"] = df["Inventory Position"] * unit_value
-avg_wc = df["Blocked WC"].mean()
-
-# Costs
-df["Holding Cost"] = (df["Total Inventory"] * unit_value * holding_cost_rate) / 365
-total_holding = df["Holding Cost"].sum()
-total_ordering = (df["New Order"] > 0).sum() * ordering_cost
-total_cost = total_holding + total_ordering
+h_rate = (holding_cost_pct / 100)
+holding_cost_total = (df["Inventory Position"] * unit_value * h_rate / 365).sum()
+ordering_cost_total = (df["New Order"] > 0).sum() * ordering_cost
+total_cost = holding_cost_total + ordering_cost_total
 
 # EOQ Calculation
-annual_demand = avg_demand * 365
-h_unit = unit_value * holding_cost_rate
-eoq = np.sqrt((2 * annual_demand * ordering_cost) / h_unit) if h_unit > 0 else 0
+annual_d = avg_demand * 365
+h_unit = unit_value * h_rate
+eoq = int(np.sqrt((2 * annual_d * ordering_cost) / h_unit)) if h_unit > 0 else 0
 
-# Comparison
-df_eoq = run_simulation(int(eoq))
-cost_eoq = ((df_eoq["Total Inventory"] * unit_value * holding_cost_rate) / 365).sum() + \
-           ((df_eoq["New Order"] > 0).sum() * ordering_cost)
+# Savings logic
+df_eoq = run_sim(eoq)
+cost_eoq = (df_eoq["Inventory Position"] * unit_value * h_rate / 365).sum() + \
+           (df_eoq["New Order"] > 0).sum() * ordering_cost
 
 # ------------------------------------------------
-# UI Layout
+# 6. Visualization
 # ------------------------------------------------
 st.subheader("Inventory Metrics")
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Stockout Days", stockout_days)
-m2.metric("Avg Age (Days)", round(avg_age, 1))
-m3.metric("Avg Inventory", int(avg_inv))
-m4.metric("Avg Working Capital", f"${int(avg_wc):,}")
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
+k2.metric("Total Cost", f"${int(total_cost):,}")
+k3.metric("EOQ Recommendation", eoq)
+k4.metric("Potential Savings", f"${max(0, int(total_cost - cost_eoq)):,}")
 
-st.subheader("Cost & EOQ Analysis")
-c1, c2, c3 = st.columns(3)
-c1.metric("Total Cost (Current)", f"${int(total_cost):,}")
-c2.metric("EOQ Value", int(eoq))
-c3.metric("Potential Savings", f"${max(0, int(total_cost - cost_eoq)):,}")
-
-# --- Main Chart ---
-st.subheader("Inventory Behaviour Over Time")
+st.subheader("Inventory Behaviour")
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=df["Date"], y=df["Closing Balance"], name="Physical Stock", line=dict(color='#1f77b4')))
-fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#ff7f0e', dash='dot')))
-fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
+fig.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2)))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
+fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="Reorder Point")
 
-# Markers
-stockouts = df[df["Closing Balance"] == 0]
-fig.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Closing Balance"], mode="markers", name="Stockout", marker=dict(color="red", size=8)))
-
+fig.update_layout(hovermode="x unified", template="plotly_dark", height=500)
 st.plotly_chart(fig, use_container_width=True)
 
-# --- Bottom Charts ---
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.subheader("Demand Distribution")
-    st.plotly_chart(px.histogram(df, x="Demand", nbins=20), use_container_width=True)
-
-with col_right:
-    st.subheader("Working Capital Trend")
-    st.plotly_chart(px.line(df, x="Date", y="Blocked WC"), use_container_width=True)
-
-st.subheader("Simulation Log")
+st.subheader("Detailed Simulation Data")
 st.dataframe(df, use_container_width=True)
