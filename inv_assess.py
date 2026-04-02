@@ -22,7 +22,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("Inventory Policy Simulator")
+st.title("Inventory Policy Simulator - L1")
 
 # ------------------------------------------------
 # Sidebar Inputs
