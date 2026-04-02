@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # ------------------------------------------------
-# 1. Page Config & Layout
+# 1. Page Config & Custom Styling
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
@@ -23,11 +23,27 @@ st.markdown(
         border-radius: 10px;
         border: 1px solid #333;
     }
-    /* Style the sidebar button to be more prominent */
-    div.stButton > button:first-child {
+    
+    /* ORANGE BUTTON STYLING */
+    div.stSidebar [data-testid="stButton"] button {
+        background-color: #FF9900;
+        color: white;
+        border-radius: 8px;
+        border: none;
         width: 100%;
-        background-color: #2e2e2e;
-        border: 1px solid #444;
+        font-weight: bold;
+        transition: 0.3s;
+    }
+    
+    div.stSidebar [data-testid="stButton"] button:hover {
+        background-color: #e68a00;
+        border: none;
+        color: white;
+    }
+    
+    div.stSidebar [data-testid="stButton"] button:active {
+        background-color: #cc7a00;
+        color: white;
     }
     </style>
     """,
@@ -43,12 +59,10 @@ st.sidebar.header("Simulation Settings")
 
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
-
-# Updated Slider: 10 to 1000, default 100
 num_days = st.sidebar.slider("Simulation Days", 10, 1000, 100)
 
-# New Button in Sidebar to regenerate demand
-regen_button = st.sidebar.button("🔄 Regenerate Demand Scenario")
+# This button is now Orange via the CSS above
+regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
@@ -65,7 +79,6 @@ ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 # ------------------------------------------------
 demand_params = f"{avg_demand}_{cov}_{num_days}"
 
-# Logic: Regenerate if params change OR the sidebar button is clicked
 if (
     "last_params" not in st.session_state or 
     st.session_state.last_params != demand_params or 
@@ -148,7 +161,7 @@ m4.metric("Total Cost", f"${int(total_cost):,}")
 st.divider()
 
 # ------------------------------------------------
-# 6. Graphs (Stacked Vertically)
+# 6. Graphs
 # ------------------------------------------------
 
 # --- 1. Inventory Behaviour ---
