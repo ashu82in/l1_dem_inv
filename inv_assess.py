@@ -24,7 +24,7 @@ st.markdown(
         border: 1px solid #333;
     }
     
-    /* GREEN BUTTON STYLING */
+    /* GREEN BUTTON STYLING (Emerald Shade) */
     section[data-testid="stSidebar"] .stButton button {
         background-color: #2E7D32 !important;
         color: white !important;
@@ -35,6 +35,7 @@ st.markdown(
         font-weight: bold !important;
         transition: 0.3s !important;
     }
+
     section[data-testid="stSidebar"] .stButton button:hover {
         background-color: #388E3C !important;
         color: white !important;
@@ -43,8 +44,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-st.title("Inventory Policy Simulator")
 
 # ------------------------------------------------
 # 2. Sidebar Inputs
@@ -101,13 +100,12 @@ def run_sim(q_val):
         opening = inv
         inv += received
         daily_demand = demand[day]
-        
-        # Calculate unmet demand (shortage)
         shortage = max(0, daily_demand - inv)
-        met_demand = daily_demand - shortage
-        
         inv = max(0, inv - daily_demand)
-        inv_pos = inv + sum(o[1] for o in pipeline)
+        
+        # Position check
+        current_pipeline_qty = sum(o[1] for o in pipeline)
+        inv_pos = inv + current_pipeline_qty
         
         placed_qty = 0
         if inv_pos < reorder_point:
@@ -115,7 +113,6 @@ def run_sim(q_val):
             if lead_time == 0: inv += placed_qty
             else: pipeline.append((day + lead_time, placed_qty))
         
-        final_pipeline = sum(o[1] for o in pipeline)
         rows.append({
             "Date": dates[day].date(), 
             "Opening": int(opening), 
@@ -123,7 +120,7 @@ def run_sim(q_val):
             "Shortage": int(shortage),
             "Received": int(received), 
             "Physical Inventory": int(inv), 
-            "Inventory Position": int(inv + final_pipeline), 
+            "Inventory Position": int(inv + sum(o[1] for o in pipeline)), 
             "New Order": int(placed_qty)
         })
     return pd.DataFrame(rows)
@@ -131,61 +128,101 @@ def run_sim(q_val):
 df = run_sim(order_qty)
 
 # ------------------------------------------------
-# 5. KPIs
+# 5. Tab Navigation
 # ------------------------------------------------
-h_rate = (holding_cost_pct / 100)
-total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
+tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
-# Fill Rate Calculation
-total_demand = df["Demand"].sum()
-total_shortage = df["Shortage"].sum()
-fill_rate = ((total_demand - total_shortage) / total_demand * 100) if total_demand > 0 else 100
+# ================================================
+# TAB 1: INVENTORY SIMULATOR
+# ================================================
+with tab1:
+    st.title("Inventory Policy Simulator")
+    
+    # KPIs
+    h_rate = (holding_cost_pct / 100)
+    total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
+    fill_rate = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
 
-st.subheader("Inventory KPI Dashboard")
-m1, m2, m3, m4, m5 = st.columns(5) # Expanded to 5 columns
-m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
-m2.metric("Fill Rate", f"{fill_rate:.1f}%", delta=f"{(fill_rate-100):.1f}%", delta_color="normal" if fill_rate >= 100 else "inverse")
-m3.metric("Min Inventory", int(df["Physical Inventory"].min()))
-m4.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
-m5.metric("Total Cost", f"${int(total_cost):,}")
-st.divider()
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
+    m2.metric("Fill Rate", f"{fill_rate:.1f}%")
+    m3.metric("Min Inventory", int(df["Physical Inventory"].min()))
+    m4.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
+    m5.metric("Total Cost", f"${int(total_cost):,}")
+    
+    st.divider()
 
-# ------------------------------------------------
-# 6. Graphs
-# ------------------------------------------------
-st.subheader("Inventory Behaviour Over Time")
-fig_inv = go.Figure()
-fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2)))
-fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
-fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
+    # Inventory Graph
+    fig_inv = go.Figure()
+    fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
+    fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
+    fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
 
-# Markers
-stockouts = df[df["Physical Inventory"] == 0]
-if not stockouts.empty:
-    fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
+    # Markers
+    stockouts = df[df["Physical Inventory"] == 0]
+    if not stockouts.empty:
+        fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Stockout", marker=dict(color="red", size=10)))
 
-reorders = df[df["New Order"] > 0]
-if not reorders.empty:
-    fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
+    reorders = df[df["New Order"] > 0]
+    if not reorders.empty:
+        fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-y_axis_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1]) if fixed_zero else dict(rangemode="normal")
-fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1), yaxis=y_axis_config)
-st.plotly_chart(fig_inv, use_container_width=True)
+    y_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1]) if fixed_zero else dict(rangemode="normal")
+    fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=600, legend=dict(orientation="h", y=1.1), yaxis=y_config)
+    st.plotly_chart(fig_inv, use_container_width=True)
 
-st.divider()
-st.subheader("Daily Demand Timeline")
-fig_dem = px.line(df, x="Date", y="Demand", color_discrete_sequence=['#AB63FA'])
-fig_dem.update_layout(template="plotly_dark", height=400, yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
-st.plotly_chart(fig_dem, use_container_width=True)
+    st.subheader("Detailed Simulation Log")
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-st.divider()
-st.subheader("Demand Frequency (Histogram)")
-st.plotly_chart(px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=400, bargap=0.1), use_container_width=True)
+# ================================================
+# TAB 2: DEMAND ANALYZER
+# ================================================
+with tab2:
+    st.title("Demand Statistics & Service Level Analysis")
+    
+    # Statistical Summary Row
+    act_std = df["Demand"].std()
+    act_mean = df["Demand"].mean()
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Max Daily Demand", int(df["Demand"].max()))
+    s2.metric("Avg Daily Demand", round(act_mean, 1))
+    s3.metric("Std. Deviation (σ)", round(act_std, 2))
+    s4.metric("CoV (Actual)", round(act_std / act_mean, 2) if act_mean > 0 else 0)
 
-st.divider()
+    st.divider()
 
-# ------------------------------------------------
-# 7. Data Table
-# ------------------------------------------------
-st.subheader("Simulation Data Log")
-st.dataframe(df, use_container_width=True, hide_index=True)
+    # --- SAFETY STOCK CALCULATOR ---
+    st.subheader("Service Level & Variability Impact")
+    c_left, c_right = st.columns([2, 1])
+    
+    with c_left:
+        st.write("""
+        **Why Variability Matters:**
+        As demand variability (CoV) increases, the risk of a stockout during the Lead Time increases. 
+        To maintain a specific **Service Level**, you must carry **Safety Stock**.
+        """)
+        
+    with c_right:
+        desired_sl = st.select_slider("Select Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
+        z_map = {0.80: 0.84, 0.85: 1.04, 0.90: 1.28, 0.95: 1.64, 0.98: 2.05, 0.99: 2.33}
+        z = z_map[desired_sl]
+        # SS = Z * σ * sqrt(LT)
+        safety_stock = z * act_std * np.sqrt(lead_time)
+        st.info(f"Recommended Safety Stock: **{int(safety_stock)} units**")
+
+    st.divider()
+
+    # Demand Distribution with Risk Zone
+    service_cutoff = np.percentile(df["Demand"], desired_sl * 100)
+    fig_hist = px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96'], marginal="box", title="Demand Distribution & Risk Threshold")
+    fig_hist.add_vline(x=service_cutoff, line_dash="dash", line_color="red", annotation_text=f"{int(desired_sl*100)}% SL")
+    fig_hist.update_layout(template="plotly_dark", height=450, bargap=0.1)
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    st.divider()
+
+    # Demand Timeline
+    st.subheader("Daily Demand Timeline")
+    fig_dem_line = px.line(df, x="Date", y="Demand", color_discrete_sequence=['#AB63FA'])
+    fig_dem_line.update_layout(template="plotly_dark", height=400, yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
+    st.plotly_chart(fig_dem_line, use_container_width=True)
