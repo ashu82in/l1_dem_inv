@@ -57,7 +57,6 @@ regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
 st.sidebar.header("Chart Settings")
-# NEW: Toggle for Y-Axis Scaling
 fixed_zero = st.sidebar.checkbox("Start Y-Axis at Zero", value=True)
 
 st.sidebar.divider()
@@ -111,10 +110,14 @@ def run_sim(q_val):
         
         final_pipeline = sum(o[1] for o in pipeline)
         rows.append({
-            "Date": dates[day], "Opening": opening, "Demand": daily_demand, 
-            "Received": received, "Physical Inventory": inv, 
-            "Pipeline": final_pipeline, "Inventory Position": inv + final_pipeline, 
-            "New Order": placed_qty
+            "Date": dates[day].date(), 
+            "Opening": int(opening), 
+            "Demand": int(daily_demand), 
+            "Received": int(received), 
+            "Physical Inventory": int(inv), 
+            "Pipeline": int(final_pipeline), 
+            "Inventory Position": int(inv + final_pipeline), 
+            "New Order": int(placed_qty)
         })
     return pd.DataFrame(rows)
 
@@ -152,19 +155,12 @@ reorders = df[df["New Order"] > 0]
 if not reorders.empty:
     fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-# DYNAMIC AXIS LOGIC
 if fixed_zero:
     y_axis_config = dict(rangemode="tozero", range=[0, df["Inventory Position"].max() * 1.1])
 else:
-    y_axis_config = dict(rangemode="normal", range=[None, None]) # Plotly defaults to auto-scale
+    y_axis_config = dict(rangemode="normal")
 
-fig_inv.update_layout(
-    hovermode="x unified", 
-    template="plotly_dark", 
-    height=500, 
-    legend=dict(orientation="h", y=1.1),
-    yaxis=y_axis_config
-)
+fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1), yaxis=y_axis_config)
 st.plotly_chart(fig_inv, use_container_width=True)
 
 st.divider()
@@ -176,3 +172,21 @@ st.plotly_chart(fig_dem, use_container_width=True)
 st.divider()
 st.subheader("Demand Frequency (Histogram)")
 st.plotly_chart(px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=400, bargap=0.1), use_container_width=True)
+
+st.divider()
+
+# ------------------------------------------------
+# 7. Data Table (Restored)
+# ------------------------------------------------
+st.subheader("Simulation Data Log")
+
+# Allow user to download the data as CSV
+csv = df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Download Simulation Data (CSV)",
+    data=csv,
+    file_name='inventory_sim_results.csv',
+    mime='text/csv',
+)
+
+st.dataframe(df, use_container_width=True, hide_index=True)
