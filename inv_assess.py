@@ -37,7 +37,7 @@ st.sidebar.header("Simulation Settings")
 
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
-num_days = st.sidebar.slider("Simulation Days", 100, 1000, 365)
+num_days = st.sidebar.slider("Simulation Days", 10, 1000, 100)
 
 st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
