@@ -14,12 +14,17 @@ st.markdown(
     """
     <style>
     .block-container { padding-left: 5rem; padding-right: 5rem; padding-top: 2rem; }
+    
+    /* ZOOM PADDING: Left sidebar buffer for Zoom tools */
     section[data-testid="stSidebar"] > div:first-child {
         padding-left: 2.5rem !important; padding-right: 1.5rem !important;
     }
+
     .stMetric {
         background-color: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333;
     }
+    
+    /* GREEN BUTTON STYLING */
     section[data-testid="stSidebar"] .stButton button {
         background-color: #2E7D32 !important; color: white !important; border: none !important;
         padding: 0.5rem 1rem !important; border-radius: 8px !important; width: 100% !important; font-weight: bold !important;
@@ -50,16 +55,17 @@ st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
 opening_balance = st.sidebar.number_input("Opening Balance", value=500)
 lead_time = st.sidebar.number_input("Lead Time (Days)", value=3, min_value=0)
-reorder_point = st.sidebar.number_input("Reorder Point (ROP)", value=70)
+reorder_point = st.sidebar.number_input("Reorder Point (ROP)", value=75)
 order_qty = st.sidebar.number_input("Order Quantity (Q)", value=300)
 unit_value = st.sidebar.number_input("Value Per Unit ($)", value=100)
 holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Demand Generation Logic
+# 3. Demand Generation Logic (Reactive State)
 # ------------------------------------------------
 demand_state_key = f"{avg_demand}_{cov}_{num_days}"
+
 if "last_demand_key" not in st.session_state or st.session_state.last_demand_key != demand_state_key or regen_button:
     st.session_state.last_demand_key = demand_state_key
     if cov <= 0:
@@ -76,7 +82,7 @@ else:
     current_dates = st.session_state.demand_dates
 
 # ------------------------------------------------
-# 4. Corrected Simulation Engine
+# 4. Simulation Engine (Corrected Timing & Logic)
 # ------------------------------------------------
 def run_sim(q_val, d_seq, d_dates):
     inv = opening_balance
@@ -93,6 +99,7 @@ def run_sim(q_val, d_seq, d_dates):
         daily_demand = d_seq[day]
         
         # 2. Position Check BEFORE current day's order placement
+        # Position = Physical Inventory + existing pipeline
         current_pipeline_qty = sum(o[1] for o in pipeline)
         inv_pos_at_trigger_check = inv + current_pipeline_qty
         
@@ -107,13 +114,16 @@ def run_sim(q_val, d_seq, d_dates):
             placed_qty = q_val
             pipeline.append((day + lead_time, placed_qty))
         
+        # Logic to check if we are in a Lead Time period (waiting for goods)
+        is_in_lead_time = len(pipeline) > 0
+        
         rows.append({
             "Date": d_dates[day].date(),
             "Opening": int(opening),
             "Demand": int(daily_demand),
             "Shortage": int(shortage),
             "Is Stockout": is_unfulfilled,
-            "In Lead Time": len(pipeline) > 0,
+            "In Lead Time": is_in_lead_time,
             "Physical Inventory": int(inv),
             "Inventory Position": int(inv + sum(o[1] for o in pipeline)),
             "New Order": int(placed_qty)
@@ -123,14 +133,15 @@ def run_sim(q_val, d_seq, d_dates):
 df = run_sim(order_qty, current_demand, current_dates)
 
 # ------------------------------------------------
-# 5. Tab Layout
+# 5. Tabbed Interface
 # ------------------------------------------------
 tab1, tab2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
+# --- TAB 1: DASHBOARD ---
 with tab1:
     st.title("Inventory Policy Dashboard")
     
-    # KPIs
+    # Metrics
     h_rate = (holding_cost_pct / 100)
     total_cost = (df["Inventory Position"] * unit_value * h_rate / 365).sum() + ((df["New Order"] > 0).sum() * ordering_cost)
     global_fr = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100
@@ -141,15 +152,17 @@ with tab1:
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Unfulfilled Days", df["Is Stockout"].sum(), help="Demand > Available Supply")
     m2.metric("Global Fill Rate", f"{global_fr:.1f}%")
-    m3.metric("LT Fill Rate", f"{lt_fr:.1f}%", help="Performance during Replenishment")
+    m3.metric("LT Fill Rate", f"{lt_fr:.1f}%", help="Fill rate specifically during lead time cycles")
     m4.metric("Min Inventory", int(df["Physical Inventory"].min()))
     m5.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
     m6.metric("Total Cost", f"${int(total_cost):,}")
     
     st.divider()
     
-    # Main Inventory Chart
+    # Primary Inventory Chart
     fig_inv = go.Figure()
+    
+    # Lead Time Shading
     for i, row in df.iterrows():
         if row["In Lead Time"]:
             fig_inv.add_vrect(x0=row["Date"], x1=row["Date"], fillcolor="red", opacity=0.08, layer="below", line_width=0)
@@ -158,39 +171,50 @@ with tab1:
     fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Event Markers
-    triggers = df[df["New Order"] > 0]
-    if not triggers.empty:
-        fig_inv.add_trace(go.Scatter(x=triggers["Date"], y=triggers["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
+    # Stockout Markers
+    stockout_pts = df[df["Is Stockout"] == True]
+    if not stockout_pts.empty:
+        fig_inv.add_trace(go.Scatter(x=stockout_pts["Date"], y=stockout_pts["Physical Inventory"], mode="markers", name="Shortage", marker=dict(color="red", size=10, symbol="x")))
     
-    stockouts = df[df["Is Stockout"] == True]
-    if not stockouts.empty:
-        fig_inv.add_trace(go.Scatter(x=stockouts["Date"], y=stockouts["Physical Inventory"], mode="markers", name="Shortage", marker=dict(color="red", size=10, symbol="x")))
+    # Order Markers (Corrected Tooltip)
+    trigger_pts = df[df["New Order"] > 0]
+    if not trigger_pts.empty:
+        fig_inv.add_trace(go.Scatter(
+            x=trigger_pts["Date"], 
+            y=trigger_pts["Physical Inventory"], 
+            mode="markers", 
+            name="Order Placed", 
+            text=[f"Order Qty: {q}" for q in trigger_pts["New Order"]],
+            hovertemplate="<b>%{x}</b><br>%{text}<br>Physical Stock: %{y}<extra></extra>",
+            marker=dict(color="#00FF00", size=10, symbol="triangle-up")
+        ))
 
     fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=450, legend=dict(orientation="h", y=1.1), yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig_inv, use_container_width=True)
 
-    # Daily Demand Charts (Tab 1 Context)
+    # Daily Demand Context
     st.divider()
+    st.subheader("Daily Demand Data Overview")
     c1, c2 = st.columns(2)
     with c1: st.plotly_chart(px.line(df, x="Date", y="Demand", title="Daily Volatility", color_discrete_sequence=['#AB63FA']).update_layout(template="plotly_dark", height=300), use_container_width=True)
     with c2: st.plotly_chart(px.histogram(df, x="Demand", nbins=20, title="Daily Distribution", color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=300, bargap=0.1), use_container_width=True)
 
-    st.subheader("Simulation Logs")
+    st.subheader("Detailed Simulation Logs")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+# --- TAB 2: ANALYZER ---
 with tab2:
-    st.title("Demand Risk Analysis")
+    st.title("Demand & Risk Analysis")
     
     ca, cb = st.columns([2, 1])
     with ca:
-        up = st.file_uploader("Upload Excel/CSV", type=["xlsx", "csv"])
+        up = st.file_uploader("Upload External Demand (Excel/CSV)", type=["xlsx", "csv"])
         if up:
             u_df = pd.read_csv(up) if up.name.endswith('.csv') else pd.read_excel(up)
             u_df['Date'] = pd.to_datetime(u_df['Date'])
             st.session_state.uploaded_demand = u_df['Demand'].values
             st.session_state.uploaded_dates = u_df['Date'].values
-            st.success("File Processed!")
+            st.success("File Ready! Toggle 'Activate' to use.")
     with cb:
         st.toggle("Activate Uploaded Data", key="use_uploaded")
         template_df = pd.DataFrame({"Date": ["2024-01-01"], "Demand": [25]})
@@ -199,16 +223,20 @@ with tab2:
         st.download_button("📥 Template", data=buf.getvalue(), file_name="template.xlsx")
 
     st.divider()
+    
+    # Window-wise blocks
     df['Rolling Sum'] = df['Demand'].rolling(window=window_size).sum()
-    st.subheader(f"Total Demand in {window_size}-Day Blocks")
+    st.subheader(f"Demand Volume in {window_size}-Day Blocks")
     df['Window_Group'] = np.arange(len(df)) // window_size
     window_totals = df.groupby('Window_Group').agg({'Demand': 'sum', 'Date': 'first'}).reset_index()
     st.plotly_chart(px.bar(window_totals, x='Date', y='Demand', color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=400), use_container_width=True)
 
     st.divider()
-    st.subheader("Safety Stock & Service Level Math")
+    
+    # Service Level Math
+    st.subheader("Service Level & Safety Stock Analysis")
     h_col, s_col = st.columns([1, 2])
-    with h_col: hist_mode = st.radio("Distribution View:", ["Daily Demand", f"{window_size}-Day Window Sum"])
+    with h_col: hist_mode = st.radio("Histogram Analysis:", ["Daily Demand", f"{window_size}-Day Window Sum"])
     with s_col: target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
 
     hist_data = df["Demand"] if hist_mode == "Daily Demand" else df["Rolling Sum"].dropna()
