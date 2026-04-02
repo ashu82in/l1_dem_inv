@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # ------------------------------------------------
-# 1. Page Config & Custom Side Padding
+# 1. Page Config & Layout
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
@@ -37,7 +37,7 @@ st.sidebar.header("Simulation Settings")
 
 avg_demand = st.sidebar.number_input("Average Demand", value=25)
 cov = st.sidebar.number_input("Coefficient of Variation (CoV)", value=0.1, step=0.1)
-num_days = st.sidebar.slider("Simulation Days", 10, 1000, 100)
+num_days = st.sidebar.slider("Simulation Days", 100, 1000, 365)
 
 st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
@@ -50,7 +50,7 @@ holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
 
 # ------------------------------------------------
-# 3. Reactive Demand Generation
+# 3. Demand Generation
 # ------------------------------------------------
 demand_params = f"{avg_demand}_{cov}_{num_days}"
 
@@ -113,7 +113,7 @@ def run_sim(q_val):
 df = run_sim(order_qty)
 
 # ------------------------------------------------
-# 5. KPIs & Economics
+# 5. Dashboard Metrics
 # ------------------------------------------------
 h_rate = (holding_cost_pct / 100)
 holding_cost_total = (df["Inventory Position"] * unit_value * h_rate / 365).sum()
@@ -121,37 +121,25 @@ ordering_cost_total = (df["New Order"] > 0).sum() * ordering_cost
 total_cost = holding_cost_total + ordering_cost_total
 min_inv_level = df["Physical Inventory"].min()
 
-# EOQ Calculation
-annual_d = avg_demand * 365
-h_unit = unit_value * h_rate
-eoq = int(np.sqrt((2 * annual_d * ordering_cost) / h_unit)) if h_unit > 0 else 0
-
-# Comparison for Savings
-df_eoq = run_sim(eoq)
-cost_eoq = (df_eoq["Inventory Position"] * unit_value * h_rate / 365).sum() + \
-           (df_eoq["New Order"] > 0).sum() * ordering_cost
-
-# ------------------------------------------------
-# 6. Visualization & Dashboard
-# ------------------------------------------------
 st.subheader("Inventory KPI Dashboard")
-
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Stockout Days", (df["Physical Inventory"] == 0).sum())
-m2.metric("Minimum Inventory", int(min_inv_level), 
-          delta=int(min_inv_level), delta_color="normal" if min_inv_level > 0 else "inverse")
-m3.metric("Average Inventory", int(df["Physical Inventory"].mean()))
-m4.metric("Total Cost", f"${int(total_cost):,}")
+m2.metric("Min Inventory", int(min_inv_level), delta=int(min_inv_level), delta_color="normal" if min_inv_level > 0 else "inverse")
+m3.metric("Avg Inventory", int(df["Physical Inventory"].mean()))
+m4.metric("Total Simulation Cost", f"${int(total_cost):,}")
 
 st.divider()
 
-# --- Main Inventory Chart ---
-st.subheader("Inventory Behaviour")
-fig_inv = go.Figure()
+# ------------------------------------------------
+# 6. Graphs (Stacked Vertically)
+# ------------------------------------------------
 
+# --- 1. Inventory Behaviour ---
+st.subheader("Inventory Behaviour Over Time")
+fig_inv = go.Figure()
 fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Physical Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2)))
-fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot', width=1.5)))
-fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="rgba(255, 0, 0, 0.5)", annotation_text="ROP")
+fig_inv.add_trace(go.Scatter(x=df["Date"], y=df["Inventory Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
+fig_inv.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
 
 # Markers
 stockouts = df[df["Physical Inventory"] == 0]
@@ -162,25 +150,29 @@ reorders = df[df["New Order"] > 0]
 if not reorders.empty:
     fig_inv.add_trace(go.Scatter(x=reorders["Date"], y=reorders["Physical Inventory"], mode="markers", name="Order Placed", marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
 
-fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=450, legend=dict(orientation="h", y=1.1))
+fig_inv.update_layout(hovermode="x unified", template="plotly_dark", height=500)
 st.plotly_chart(fig_inv, use_container_width=True)
 
-# --- Demand Analysis Section ---
 st.divider()
-st.subheader("Demand Analysis")
-col_plot, col_hist = st.columns(2)
 
-with col_plot:
-    st.write("**Daily Demand Timeline**")
-    fig_dem_line = px.line(df, x="Date", y="Demand", color_discrete_sequence=['#AB63FA'])
-    fig_dem_line.update_layout(template="plotly_dark", height=350)
-    st.plotly_chart(fig_dem_line, use_container_width=True)
+# --- 2. Demand Timeline ---
+st.subheader("Daily Demand Timeline")
+fig_dem_line = px.line(df, x="Date", y="Demand", color_discrete_sequence=['#AB63FA'])
+fig_dem_line.update_layout(template="plotly_dark", height=400, yaxis_title="Units Demanded")
+st.plotly_chart(fig_dem_line, use_container_width=True)
 
-with col_hist:
-    st.write("**Demand Frequency (Histogram)**")
-    fig_dem_hist = px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96'])
-    fig_dem_hist.update_layout(template="plotly_dark", height=350, bargap=0.1)
-    st.plotly_chart(fig_dem_hist, use_container_width=True)
+st.divider()
 
+# --- 3. Demand Histogram ---
+st.subheader("Demand Frequency (Histogram)")
+fig_dem_hist = px.histogram(df, x="Demand", nbins=30, color_discrete_sequence=['#00CC96'])
+fig_dem_hist.update_layout(template="plotly_dark", height=400, bargap=0.1, yaxis_title="Frequency (Days)")
+st.plotly_chart(fig_dem_hist, use_container_width=True)
+
+st.divider()
+
+# ------------------------------------------------
+# 7. Data Table
+# ------------------------------------------------
 st.subheader("Detailed Simulation Log")
 st.dataframe(df, use_container_width=True)
