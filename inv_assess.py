@@ -265,9 +265,9 @@ with t1:
         # Remove 'render_mode' from here; it's not a layout property
     )
 
-# Alternative way to force WebGL if the above doesn't feel fast enough:
-# use_container_width=True
-st.plotly_chart(fig, use_container_width=True)
+    # Alternative way to force WebGL if the above doesn't feel fast enough:
+    # use_container_width=True
+    st.plotly_chart(fig, use_container_width=True)
 
     # st.subheader("Inventory Levels Over Time")
     # fig = go.Figure()
