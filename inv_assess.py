@@ -222,48 +222,68 @@ with t1:
 with t2:
     st.title("Risk & Window Analysis")
     
-    # CRITICAL: Define window_size here since it's used in this tab
-    window_size = st.slider("Select Analysis Window (Days)", 1, 30, 7)
+    # 1. Setup Analysis Window
+    window_size = st.slider("Select Analysis Window (Days)", 1, 30, 5, key="tab2_window")
     
-    # 1. Block Volume Analysis
-    st.subheader(f"Demand Volume in {window_size}-Day Blocks")
-    df['Block_Group'] = np.arange(len(df)) // window_size
-    block_df = df.groupby('Block_Group').agg({'Date': 'first', 'Demand': 'sum'}).reset_index()
-    fig_blocks = px.bar(block_df, x='Date', y='Demand', color_discrete_sequence=['#50C878'])
-    fig_blocks.update_layout(template="plotly_dark", height=400, xaxis_title="Timeline", yaxis_title="Sum of Demand")
-    st.plotly_chart(fig_blocks, use_container_width=True)
+    # 2. FORCE RE-CALCULATION of Rolling Demand
+    # We pull directly from session_state to ensure we aren't using "stale" data
+    current_demand_series = pd.Series(st.session_state.demand_seq)
+    rolling_demand = current_demand_series.rolling(window=window_size).sum().dropna()
 
-    st.divider()
+    if not rolling_demand.empty:
+        # 3. Target Service Level Slider
+        target_sl = st.slider(
+            "Target Service Level", 
+            0.50, 0.99, 0.95, 
+            step=0.01, 
+            format="%.2f"
+        )
+        
+        # 4. Logic for Risk Gap
+        cutoff = np.percentile(rolling_demand, target_sl * 100)
+        max_demand = rolling_demand.max()
+        min_demand = rolling_demand.min()
+        risk_gap = max_demand - cutoff
+        
+        # 5. Metric Row
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff):.0f} Units")
+        r2.metric("Max Demand Observed", f"{int(max_demand):.0f} Units")
+        r3.metric("The Risk Gap", f"{int(risk_gap):.0f} Units", delta="Uncovered", delta_color="inverse")
+        r4.metric("Risk Value Exposure", f"${int(risk_gap * unit_value):,}")
 
-    # 2. Risk Gap Analysis
-    st.subheader("Service Level vs. Maximum Exposure")
-    df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
-    hist_data = df['RollSum'].dropna()
-    # Updated Slider Logic
-    target_sl = st.slider(
-        "Target Service Level", 
-        min_value=0.50, 
-        max_value=0.99, 
-        value=0.95, 
-        step=0.01,
-        format="%.2f" # This ensures it displays as 0.95 instead of 0.9500001
-    )
-    
-    # Logic for Risk Gap (remains the same)
-    cutoff = np.percentile(hist_data, target_sl * 100)
-    max_demand = hist_data.max()
-    risk_gap = max_demand - cutoff
-    
-    # Metric Row
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff)} Units")
-    r2.metric("Max Demand Observed", f"{int(max_demand)} Units")
-    r3.metric("The Risk Gap", f"{int(risk_gap)} Units", delta="Uncovered", delta_color="inverse")
-    r4.metric("Risk Value Exposure", f"${int(risk_gap * unit_value):,}")
+        # 6. Optimized Histogram
+        fig_risk = px.histogram(
+            rolling_demand, 
+            nbins=30, 
+            color_discrete_sequence=['#00CC96'], 
+            title=f"Demand Distribution over {window_size}-Day Window"
+        )
+        
+        # Add Visual Markers
+        fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="yellow", 
+                           annotation_text=f"{int(target_sl*100)}% SL")
+        fig_risk.add_vline(x=max_demand, line_dash="dot", line_color="red", 
+                           annotation_text="Absolute MAX")
+        
+        # Shading the Unprotected Zone
+        fig_risk.add_vrect(
+            x0=cutoff, x1=max_demand, 
+            fillcolor="red", opacity=0.15, 
+            layer="below", line_width=0, 
+            annotation_text="UNPROTECTED ZONE"
+        )
 
-    fig_risk = px.histogram(hist_data, nbins=30, color_discrete_sequence=['#00CC96'], title=f"Demand Distribution over {window_size}-Day Window")
-    fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="yellow", annotation_text=f"{int(target_sl*100)}% SL")
-    fig_risk.add_vline(x=max_demand, line_dash="dot", line_color="red", annotation_text="Absolute MAX")
-    fig_risk.add_vrect(x0=cutoff, x1=max_demand, fillcolor="red", opacity=0.15, layer="below", line_width=0, annotation_text="UNPROTECTED ZONE")
-    fig_risk.update_layout(template="plotly_dark", height=450)
-    st.plotly_chart(fig_risk, use_container_width=True)
+        # CRITICAL: Force X-Axis scaling so it doesn't look like a solid block
+        # We set the range to be 20% wider than the actual data spread
+        x_range_extension = (max_demand - min_demand) * 0.2 if max_demand > min_demand else 10
+        fig_risk.update_xaxes(
+            range=[min_demand - x_range_extension, max_demand + x_range_extension],
+            title="Total Demand in Window"
+        )
+        
+        fig_risk.update_layout(template="plotly_dark", height=450, showlegend=False)
+        st.plotly_chart(fig_risk, use_container_width=True)
+        
+    else:
+        st.warning("Please increase 'Horizon (Days)' in the sidebar to generate enough data for this window.")
