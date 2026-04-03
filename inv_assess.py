@@ -206,32 +206,58 @@ with t1:
     # CHARTS (FULL RESTORATION OF MARKERS & SHADING)
     st.subheader("Inventory Levels Over Time")
     fig = go.Figure()
-    # Shading for Lead Time Windows
-    for i, r in df.iterrows():
-        if r["InLT"]: fig.add_vrect(x0=r["Date"], x1=r["Date"], fillcolor="red", opacity=0.05, layer="below", line_width=0)
+    
+    # Fast Vectorized Shading
+    fig.add_trace(go.Scatter(
+        x=df["Date"], y=np.where(df["InLT"], df["Position"].max(), np.nan),
+        fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.05)', line=dict(width=0), 
+        name="Lead Time Window", showlegend=False, hoverinfo='skip'
+    ))
     
     fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
     fig.add_trace(go.Scatter(x=df["Date"], y=df["Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Restored Logic for Markers
+    # Vectorized Event Markers
     orders = df[df["Order"] > 0]
     if not orders.empty:
         fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Placed", 
                                  marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
-    shorts = df[df["IsStockout"] == True]
+    shorts = df[df["IsStockout"]]
     if not shorts.empty:
         fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", 
                                  marker=dict(color="red", size=10, symbol="x")))
 
-    fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", yaxis=dict(rangemode="tozero"))
+    fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", render_mode='webgl')
     st.plotly_chart(fig, use_container_width=True)
+    # st.subheader("Inventory Levels Over Time")
+    # fig = go.Figure()
+    # # Shading for Lead Time Windows
+    # for i, r in df.iterrows():
+    #     if r["InLT"]: fig.add_vrect(x0=r["Date"], x1=r["Date"], fillcolor="red", opacity=0.05, layer="below", line_width=0)
+    
+    # fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
+    # fig.add_trace(go.Scatter(x=df["Date"], y=df["Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
+    # fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
+    
+    # # Restored Logic for Markers
+    # orders = df[df["Order"] > 0]
+    # if not orders.empty:
+    #     fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Placed", 
+    #                              marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
+    # shorts = df[df["IsStockout"] == True]
+    # if not shorts.empty:
+    #     fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", 
+    #                              marker=dict(color="red", size=10, symbol="x")))
 
-    # Restored Pipeline Area Chart
-    st.subheader("Pipeline Inventory (Units in Transit)")
-    fig_pipe = px.area(df, x="Date", y="Pipeline", color_discrete_sequence=['#FFCC00'])
-    fig_pipe.update_layout(template="plotly_dark", height=250, yaxis_title="Units", yaxis=dict(rangemode="tozero"))
-    st.plotly_chart(fig_pipe, use_container_width=True)
+    # fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", yaxis=dict(rangemode="tozero"))
+    # st.plotly_chart(fig, use_container_width=True)
+
+    # # Restored Pipeline Area Chart
+    # st.subheader("Pipeline Inventory (Units in Transit)")
+    # fig_pipe = px.area(df, x="Date", y="Pipeline", color_discrete_sequence=['#FFCC00'])
+    # fig_pipe.update_layout(template="plotly_dark", height=250, yaxis_title="Units", yaxis=dict(rangemode="tozero"))
+    # st.plotly_chart(fig_pipe, use_container_width=True)
 
     # Restored Demand Visuals in Tab 1
     st.divider()
