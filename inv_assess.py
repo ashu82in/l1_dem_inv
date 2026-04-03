@@ -14,7 +14,7 @@ st.markdown(
     """
     <style>
     .block-container { padding: 2rem 5rem; }
-    section[data-testid="stSidebar"] > div:first-child { padding-left: 2.5rem !important; }
+    section[data-testid="stSidebar"] > div:first-child { padding-left: 3.5rem !important; }
     
     [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #FFFFFF !important; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold !important; color: #9ea4ad !important; }
