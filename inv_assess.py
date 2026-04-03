@@ -8,7 +8,8 @@ import io
 # ------------------------------------------------
 # 1. Page Config & Styling
 # ------------------------------------------------
-st.set_config(layout="wide", page_title="Inventory Simulator Pro")
+# FIXED: Changed set_config to set_page_config
+st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
 st.markdown(
     """
@@ -16,7 +17,7 @@ st.markdown(
     .block-container { padding: 2rem 5rem; }
     section[data-testid="stSidebar"] > div:first-child { padding-left: 2.5rem !important; }
     
-    /* Clean Metric Styling - Removes the grey boxes for a professional dashboard look */
+    /* Clean Metric Styling - Professional Dashboard Look */
     [data-testid="stMetricValue"] { font-size: 1.6rem !important; color: #FFFFFF !important; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold !important; color: #9ea4ad !important; }
     
@@ -125,11 +126,11 @@ with t1:
     # --- ROW 2: PHYSICAL VS TOTAL COMPARISONS ---
     st.write("### Physical vs. Total (Inventory & Working Capital)")
     k6, k7, k8, k9, k10 = st.columns(5)
-    k6.metric("Min Phys/Tot Inv", f"{df['Inventory'].min():.0f} / {df['Position'].min():.0f}")
-    k7.metric("Max Phys/Tot Inv", f"{df['Inventory'].max():.0f} / {df['Position'].max():.0f}")
-    k8.metric("Min Phys/Tot WC", f"${(df['Inventory'].min()*unit_value):,.0f} / ${(df['Position'].min()*unit_value):,.0f}")
-    k9.metric("Max Phys/Tot WC", f"${(df['Inventory'].max()*unit_value):,.0f} / ${(df['Position'].max()*unit_value):,.0f}")
-    k10.metric("Avg Phys/Tot WC", f"${(df['Inventory'].mean()*unit_value):,.0f} / ${(df['Position'].mean()*unit_value):,.0f}")
+    k6.metric("Min Phys / Tot Inv", f"{df['Inventory'].min():.0f} / {df['Position'].min():.0f}")
+    k7.metric("Max Phys / Tot Inv", f"{df['Inventory'].max():.0f} / {df['Position'].max():.0f}")
+    k8.metric("Min Phys / Tot WC", f"${(df['Inventory'].min()*unit_value):,.0f} / ${(df['Position'].min()*unit_value):,.0f}")
+    k9.metric("Max Phys / Tot WC", f"${(df['Inventory'].max()*unit_value):,.0f} / ${(df['Position'].max()*unit_value):,.0f}")
+    k10.metric("Avg Phys / Tot WC", f"${(df['Inventory'].mean()*unit_value):,.0f} / ${(df['Position'].mean()*unit_value):,.0f}")
 
     # --- COLLAPSIBLE FINANCIAL SECTION ---
     with st.expander("💰 Financial Metrics & EOQ Comparison", expanded=False):
@@ -153,7 +154,7 @@ with t1:
 
     st.divider()
 
-    # --- CHARTS SECTION ---
+    # --- MAIN CHART ---
     st.subheader("Inventory Levels Over Time")
     fig = go.Figure()
     for i, r in df.iterrows():
