@@ -15,7 +15,11 @@ st.markdown(
     <style>
     .block-container { padding: 2rem 5rem; }
     section[data-testid="stSidebar"] > div:first-child { padding-left: 2.5rem !important; }
-    .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    
+    /* Clean KPI Styling - Removing the boxes */
+    [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
+    [data-testid="stMetricLabel"] { font-size: 1rem !important; font-weight: bold !important; color: #9ea4ad !important; }
+    
     section[data-testid="stSidebar"] .stButton button {
         background-color: #2E7D32 !important; color: white !important; width: 100% !important; font-weight: bold !important;
     }
@@ -69,7 +73,6 @@ def run_sim(q_val):
         pipeline = [o for o in pipeline if o[0] != day]
         inv += received
         
-        # Position check (Physical + Pipeline) BEFORE demand
         pos_at_check = inv + sum(o[1] for o in pipeline)
         
         placed_qty = 0
@@ -78,15 +81,15 @@ def run_sim(q_val):
             pipeline.append((day + lead_time, placed_qty))
         
         demand = d_seq[day]
-        is_stockout = demand > inv
         shortage = max(0, demand - inv)
         inv = max(0, inv - demand)
+        is_unfulfilled = demand > (inv + shortage) # Logic: was demand fully met?
         
         final_pipe = sum(o[1] for o in pipeline)
         
         rows.append({
             "Date": d_dates[day].date(), "Demand": demand, "Shortage": shortage, 
-            "IsStockout": is_stockout, "Inventory": inv, "Pipeline": final_pipe,
+            "IsStockout": shortage > 0, "Inventory": inv, "Pipeline": final_pipe,
             "Position": inv + final_pipe, "Order": placed_qty,
             "InLT": final_pipe > 0, "HoldingCost": inv * unit_value * daily_h_rate,
             "OrderingCost": ordering_cost if placed_qty > 0 else 0
@@ -107,50 +110,55 @@ eoq_df = run_sim(eoq_val)
 t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
 with t1:
-    # --- GENERAL KPIs (Always Visible) ---
+    # --- KPI SECTION: 5 COLUMNS, NO BLOCKS ---
     st.subheader("Inventory Operational & Service KPIs")
-    g1, g2, g3, g4 = st.columns(4)
-    g1.metric("Stockout Days", int(df["IsStockout"].sum()))
     
-    global_fr = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100.0
-    g2.metric("Global Fill Rate", f"{global_fr:.1f}%")
-    
+    # Pre-calculations for Ratios
+    avg_total_cap = df['Position'].mean() * unit_value
+    avg_inv_total = df['Position'].mean()
     lt_df = df[df["InLT"] == True]
     lt_fr = ((lt_df["Demand"].sum() - lt_df["Shortage"].sum()) / lt_df["Demand"].sum() * 100) if not lt_df.empty else 100.0
-    g3.metric("Lead Time Fill Rate", f"{lt_fr:.1f}%")
-    
-    g4.metric("Average Inventory", f"{df['Inventory'].mean():.1f}")
+    global_fr = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100.0
 
-    st.subheader("Working Capital Analysis")
-    w1, w2, w3, w4 = st.columns(4)
-    avg_phys_cap = df['Inventory'].mean() * unit_value
-    avg_pipe_cap = df['Pipeline'].mean() * unit_value
-    w1.metric("Avg Physical Capital", f"${avg_phys_cap:,.0f}")
-    w2.metric("Avg Pipeline Capital", f"${avg_pipe_cap:,.0f}")
-    w3.metric("Total Working Capital", f"${(avg_phys_cap + avg_pipe_cap):,.0f}", help="Physical + Pipeline")
-    w4.metric("Inventory Turnover", f"{(annual_d / df['Inventory'].mean()):.1f}x")
+    kpi_r1 = st.columns(5)
+    kpi_r1[0].metric("Stockout Days", int(df["IsStockout"].sum()))
+    kpi_r1[1].metric("Global Fill Rate", f"{global_fr:.1f}%")
+    kpi_r1[2].metric("LT Fill Rate", f"{lt_fr:.1f}%")
+    kpi_r1[3].metric("Avg Physical Inv", f"{df['Inventory'].mean():.1f}")
+    kpi_r1[4].metric("Avg Age Phys Inv", f"{(df['Inventory'].mean() / avg_demand):.1f} Days")
 
-    # --- COST & EOQ KPIs (Collapsible) ---
-    with st.expander("💰 🛠️ Financial Deep-Dive & EOQ Comparison", expanded=False):
-        st.subheader("Detailed Cost Breakdown")
-        c1, c2, c3 = st.columns(3)
+    st.write("### Inventory & Working Capital Ratios")
+    kpi_r2 = st.columns(5)
+    kpi_r2[0].metric("Min Phys/Tot Inv", f"{(df['Inventory'].min() / avg_inv_total if avg_inv_total > 0 else 0):.2%}")
+    kpi_r2[1].metric("Max Phys/Tot Inv", f"{(df['Inventory'].max() / avg_inv_total if avg_inv_total > 0 else 0):.2%}")
+    kpi_r2[2].metric("Min Phys/Tot WC", f"{(df['Inventory'].min() * unit_value / avg_total_cap if avg_total_cap > 0 else 0):.2%}")
+    kpi_r2[3].metric("Max Phys/Tot WC", f"{(df['Inventory'].max() * unit_value / avg_total_cap if avg_total_cap > 0 else 0):.2%}")
+    kpi_r2[4].metric("Avg Phys/Tot WC", f"{(df['Inventory'].mean() * unit_value / avg_total_cap if avg_total_cap > 0 else 0):.2%}")
+
+    # --- COLLAPSIBLE FINANCIALS ---
+    with st.expander("💰 Financial Metrics & EOQ Deep-Dive", expanded=False):
+        st.write("### Cost Breakdown")
+        f_col = st.columns(5)
         total_cost_curr = df['HoldingCost'].sum() + df['OrderingCost'].sum()
-        c1.metric("Total Holding Cost", f"${df['HoldingCost'].sum():,.0f}")
-        c2.metric("Total Ordering Cost", f"${df['OrderingCost'].sum():,.0f}")
-        c3.metric("Total Policy Cost", f"${total_cost_curr:,.0f}")
+        f_col[0].metric("Total Holding Cost", f"${df['HoldingCost'].sum():,.0f}")
+        f_col[1].metric("Total Ordering Cost", f"${df['OrderingCost'].sum():,.0f}")
+        f_col[2].metric("Total Policy Cost", f"${total_cost_curr:,.0f}")
+        f_col[3].metric("Avg Total WC", f"${avg_total_cap:,.0f}")
+        f_col[4].metric("Inv Turnover", f"{(annual_d / df['Inventory'].mean() if df['Inventory'].mean() > 0 else 0):.1f}x")
 
-        st.subheader("EOQ Strategy Comparison")
-        e1, e2, e3, e4 = st.columns(4)
+        st.write("### EOQ Comparison")
+        e_col = st.columns(5)
         total_cost_eoq = eoq_df['HoldingCost'].sum() + eoq_df['OrderingCost'].sum()
-        e1.metric("Economic Order Qty", f"{int(eoq_val)}")
-        e2.metric("Current Order Qty", f"{order_qty}")
-        e3.metric("Cost with EOQ", f"${total_cost_eoq:,.0f}")
-        e4.metric("Potential Savings", f"${(total_cost_curr - total_cost_eoq):,.0f}")
+        e_col[0].metric("EOQ Value", f"{int(eoq_val)}")
+        e_col[1].metric("Selected Q", f"{order_qty}")
+        e_col[2].metric("Cost with EOQ", f"${total_cost_eoq:,.0f}")
+        e_col[3].metric("Potential Savings", f"${(total_cost_curr - total_cost_eoq):,.0f}")
+        e_col[4].metric("EOQ Impact %", f"{((total_cost_curr - total_cost_eoq)/total_cost_curr if total_cost_curr > 0 else 0):.1%}")
 
     st.divider()
 
-    # --- MAIN CHARTS ---
-    st.subheader("Inventory Levels & Reorder Position")
+    # --- MAIN CHART ---
+    st.subheader("Inventory Levels Over Time")
     fig = go.Figure()
     for i, r in df.iterrows():
         if r["InLT"]: fig.add_vrect(x0=r["Date"], x1=r["Date"], fillcolor="red", opacity=0.05, layer="below", line_width=0)
@@ -168,36 +176,46 @@ with t1:
         fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", 
                                  marker=dict(color="red", size=10, symbol="x")))
 
-    fig.update_layout(template="plotly_dark", height=400, hovermode="x unified", yaxis=dict(rangemode="tozero"))
+    fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", yaxis=dict(rangemode="tozero"))
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Pipeline Inventory (Goods in Transit)")
+    # --- PIPELINE AREA CHART ---
+    st.subheader("Pipeline Inventory (Units in Transit)")
     fig_pipe = px.area(df, x="Date", y="Pipeline", color_discrete_sequence=['#FFCC00'])
-    fig_pipe.update_layout(template="plotly_dark", height=200, yaxis_title="Units", yaxis=dict(rangemode="tozero"))
+    fig_pipe.update_layout(template="plotly_dark", height=250, yaxis_title="Units", yaxis=dict(rangemode="tozero"))
     st.plotly_chart(fig_pipe, use_container_width=True)
 
-    # --- DEMAND ANALYTICS (Tab 1 Bottom) ---
+    # --- TAB 1 DEMAND VISUALS ---
     st.divider()
-    st.subheader("Daily Demand Context")
-    c_h, c_l = st.columns(2)
-    with c_h:
-        st.plotly_chart(px.histogram(df, x="Demand", nbins=15, title="Demand Frequency", color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=300, bargap=0.1), use_container_width=True)
-    with c_l:
-        st.plotly_chart(px.line(df, x="Date", y="Demand", title="Daily Volatility", color_discrete_sequence=['#AB63FA']).update_layout(template="plotly_dark", height=300), use_container_width=True)
+    st.subheader("Daily Demand Profile")
+    cl_hist, cl_line = st.columns(2)
+    with cl_hist:
+        fig_h1 = px.histogram(df, x="Demand", nbins=15, title="Demand Frequency", color_discrete_sequence=['#00CC96'])
+        fig_h1.update_layout(template="plotly_dark", height=300, bargap=0.1)
+        st.plotly_chart(fig_h1, use_container_width=True)
+    with cl_line:
+        fig_l1 = px.line(df, x="Date", y="Demand", title="Daily Volatility", color_discrete_sequence=['#AB63FA'])
+        fig_l1.update_layout(template="plotly_dark", height=300)
+        st.plotly_chart(fig_l1, use_container_width=True)
 
     st.subheader("Simulation Log")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+# --- TAB 2: RISK ANALYZER ---
 with t2:
     st.title("Risk & Window Analysis")
-    window_days = st.slider("Analysis Window (Days)", 1, 30, 7)
+    window_days = st.slider("Select Analysis Window (Days)", 1, 30, 7)
     df['RollSum'] = df['Demand'].rolling(window=window_days).sum()
     hist_data = df['RollSum'].dropna()
-    target_sl = st.select_slider("Service Level Target", options=[0.80, 0.90, 0.95, 0.99], value=0.95)
+    target_sl = st.select_slider("Target Service Level", options=[0.80, 0.90, 0.95, 0.99], value=0.95)
     cutoff = np.percentile(hist_data, target_sl * 100)
     
-    st.metric(f"{int(target_sl*100)}% Service Level Threshold", f"{int(cutoff)} Units")
-    fig_risk = px.histogram(hist_data, nbins=25, color_discrete_sequence=['#00CC96'], title=f"Demand Distribution over {window_days} Days")
+    r_sl, r_mx, r_gp = st.columns(3)
+    r_sl.metric(f"{int(target_sl*100)}% SL Threshold", int(cutoff))
+    r_mx.metric("Max Demand in Window", int(hist_data.max()))
+    r_gp.metric("Units Exposed", int(hist_data.max() - cutoff), delta="Risk", delta_color="inverse")
+    
+    fig_risk = px.histogram(hist_data, nbins=25, color_discrete_sequence=['#00CC96'], title=f"{window_days}-Day Window Demand Distribution")
     fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="red", annotation_text="Target SL")
     fig_risk.update_layout(template="plotly_dark", height=450)
     st.plotly_chart(fig_risk, use_container_width=True)
