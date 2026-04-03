@@ -8,7 +8,6 @@ import io
 # ------------------------------------------------
 # 1. Page Config & Styling
 # ------------------------------------------------
-# FIXED: Changed set_config to set_page_config
 st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
 st.markdown(
@@ -17,8 +16,7 @@ st.markdown(
     .block-container { padding: 2rem 5rem; }
     section[data-testid="stSidebar"] > div:first-child { padding-left: 2.5rem !important; }
     
-    /* Clean Metric Styling - Professional Dashboard Look */
-    [data-testid="stMetricValue"] { font-size: 1.6rem !important; color: #FFFFFF !important; }
+    [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #FFFFFF !important; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold !important; color: #9ea4ad !important; }
     
     section[data-testid="stSidebar"] .stButton button {
@@ -98,7 +96,7 @@ def run_sim(q_val):
 
 df = run_sim(order_qty)
 
-# EOQ Comparison Math
+# EOQ Setup
 annual_d = avg_demand * 365
 annual_h = unit_value * (holding_cost_pct / 100)
 eoq_val = np.sqrt((2 * annual_d * ordering_cost) / annual_h)
@@ -110,8 +108,16 @@ eoq_df = run_sim(eoq_val)
 t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
 with t1:
+    # --- DYNAMIC TOGGLE ---
+    st.write("### Inventory Dashboard Controls")
+    use_pipeline = st.checkbox("Include Pipeline Inventory in KPIs", value=False)
+    
+    # Logic for Toggle
+    target_col = "Position" if use_pipeline else "Inventory"
+    label_suffix = "(Incl. Pipeline)" if use_pipeline else "(Physical Only)"
+
     # --- ROW 1: OPERATIONAL & SERVICE KPIs ---
-    st.subheader("Inventory Operational & Service KPIs")
+    st.subheader(f"Inventory Operational & Service KPIs {label_suffix}")
     lt_df = df[df["InLT"] == True]
     lt_fr = ((lt_df["Demand"].sum() - lt_df["Shortage"].sum()) / lt_df["Demand"].sum() * 100) if not lt_df.empty else 100.0
     global_fr = ((df["Demand"].sum() - df["Shortage"].sum()) / df["Demand"].sum() * 100) if df["Demand"].sum() > 0 else 100.0
@@ -120,17 +126,17 @@ with t1:
     k1.metric("Stockout Days", int(df["IsStockout"].sum()))
     k2.metric("Global Fill Rate", f"{global_fr:.1f}%")
     k3.metric("LT Fill Rate", f"{lt_fr:.1f}%")
-    k4.metric("Avg Physical Inv", f"{df['Inventory'].mean():.1f}")
-    k5.metric("Avg Age Phys Inv", f"{(df['Inventory'].mean() / avg_demand):.1f} Days")
+    k4.metric(f"Avg Inv {label_suffix}", f"{df[target_col].mean():.1f}")
+    k5.metric(f"Avg Age {label_suffix}", f"{(df[target_col].mean() / avg_demand):.1f} Days")
 
-    # --- ROW 2: PHYSICAL VS TOTAL COMPARISONS ---
-    st.write("### Physical vs. Total (Inventory & Working Capital)")
+    # --- ROW 2: DYNAMIC RANGE & WORKING CAPITAL ---
+    st.write(f"### Range & Working Capital Analysis {label_suffix}")
     k6, k7, k8, k9, k10 = st.columns(5)
-    k6.metric("Min Phys / Tot Inv", f"{df['Inventory'].min():.0f} / {df['Position'].min():.0f}")
-    k7.metric("Max Phys / Tot Inv", f"{df['Inventory'].max():.0f} / {df['Position'].max():.0f}")
-    k8.metric("Min Phys / Tot WC", f"${(df['Inventory'].min()*unit_value):,.0f} / ${(df['Position'].min()*unit_value):,.0f}")
-    k9.metric("Max Phys / Tot WC", f"${(df['Inventory'].max()*unit_value):,.0f} / ${(df['Position'].max()*unit_value):,.0f}")
-    k10.metric("Avg Phys / Tot WC", f"${(df['Inventory'].mean()*unit_value):,.0f} / ${(df['Position'].mean()*unit_value):,.0f}")
+    k6.metric(f"Min Inv {label_suffix}", f"{df[target_col].min():.0f}")
+    k7.metric(f"Max Inv {label_suffix}", f"{df[target_col].max():.0f}")
+    k8.metric(f"Min WC {label_suffix}", f"${(df[target_col].min()*unit_value):,.0f}")
+    k9.metric(f"Max WC {label_suffix}", f"${(df[target_col].max()*unit_value):,.0f}")
+    k10.metric(f"Avg WC {label_suffix}", f"${(df[target_col].mean()*unit_value):,.0f}")
 
     # --- COLLAPSIBLE FINANCIAL SECTION ---
     with st.expander("💰 Financial Metrics & EOQ Comparison", expanded=False):
@@ -140,8 +146,8 @@ with t1:
         f1.metric("Total Holding Cost", f"${df['HoldingCost'].sum():,.0f}")
         f2.metric("Total Ordering Cost", f"${df['OrderingCost'].sum():,.0f}")
         f3.metric("Total Policy Cost", f"${total_cost_curr:,.0f}")
-        f4.metric("Avg Total WC", f"${(df['Position'].mean()*unit_value):,.0f}")
-        # f5.metric("Inv Turnover", f"{(annual_d / df['Inventory'].mean() if df['Inventory'].mean() > 0 else 0):.1f}x")
+        f4.metric("Avg Total WC (Position)", f"${(df['Position'].mean()*unit_value):,.0f}")
+        f5.metric("Inv Turnover", f"{(annual_d / df['Inventory'].mean() if df['Inventory'].mean() > 0 else 0):.1f}x")
 
         st.write("### EOQ Strategy Comparison")
         e1, e2, e3, e4, e5 = st.columns(5)
@@ -154,7 +160,7 @@ with t1:
 
     st.divider()
 
-    # --- MAIN CHART ---
+    # --- CHARTS SECTION ---
     st.subheader("Inventory Levels Over Time")
     fig = go.Figure()
     for i, r in df.iterrows():
@@ -181,9 +187,9 @@ with t1:
     fig_pipe.update_layout(template="plotly_dark", height=250, yaxis_title="Units", yaxis=dict(rangemode="tozero"))
     st.plotly_chart(fig_pipe, use_container_width=True)
 
-    # --- DEMAND ANALYTICS ON TAB 1 ---
+    # --- TAB 1 DEMAND VISUALS ---
     st.divider()
-    st.subheader("Demand Context")
+    st.subheader("Demand Analysis (Historical Context)")
     cl_hist, cl_line = st.columns(2)
     with cl_hist:
         fig_h1 = px.histogram(df, x="Demand", nbins=15, title="Demand Frequency", color_discrete_sequence=['#00CC96'])
