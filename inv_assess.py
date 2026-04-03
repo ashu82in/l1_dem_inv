@@ -64,7 +64,7 @@ if "demand_seq" not in st.session_state or regen_button:
     st.session_state.demand_dates = pd.date_range(start="2024-01-01", periods=num_days)
 
 # ------------------------------------------------
-# 4. Simulation Engine (The Professional Logic)
+# 4. Simulation Engine (The "Gold Standard" Logic)
 # ------------------------------------------------
 def run_sim():
     inv = opening_balance
@@ -82,8 +82,7 @@ def run_sim():
         opening = inv
         demand = d_seq[day]
         
-        # B. Position check (Physical + Pipeline) BEFORE demand
-        # This determines the decision to trigger a new order
+        # B. Position check (Physical + Pipeline) BEFORE satisfying demand
         current_pipeline_qty = sum(o[1] for o in pipeline)
         pos_at_check = inv + current_pipeline_qty
         
@@ -94,12 +93,13 @@ def run_sim():
             pipeline.append((day + lead_time, placed_qty))
             
         # D. Satisfy Demand
+        is_unfulfilled = demand > inv
         shortage = max(0, demand - inv)
         inv = max(0, inv - demand)
         
         rows.append({
             "Date": d_dates[day].date(), "Opening": opening, "Demand": demand, 
-            "Shortage": shortage, "Inventory": inv, 
+            "Shortage": shortage, "Is Stockout": is_unfulfilled, "Inventory": inv, 
             "Position": inv + sum(o[1] for o in pipeline), 
             "Order": placed_qty, "InLT": len(pipeline) > 0
         })
@@ -115,7 +115,7 @@ t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 with t1:
     # 1. KPI Metrics
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Stockout Days", (df["Shortage"] > 0).sum())
+    m1.metric("Stockout Days", df["Is Stockout"].sum(), help="Days where Demand > Supply")
     m2.metric("Fill Rate", f"{((df['Demand'].sum()-df['Shortage'].sum())/df['Demand'].sum()*100):.1f}%")
     m3.metric("Min Stock", int(df["Inventory"].min()))
     m4.metric("Avg Stock", int(df["Inventory"].mean()))
@@ -131,7 +131,7 @@ with t1:
     fig.add_trace(go.Scatter(x=df["Date"], y=df["Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Order markers with correct Tooltip Qty
+    # Order markers
     orders = df[df["Order"] > 0]
     if not orders.empty:
         fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Triggered", 
@@ -139,12 +139,18 @@ with t1:
                                  hovertemplate="<b>%{x}</b><br>%{text}<br>Physical Stock: %{y}<extra></extra>",
                                  marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
     
+    # Stockout (Shortage) markers - RESTORED
+    shorts = df[df["Is Stockout"] == True]
+    if not shorts.empty:
+        fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", 
+                                 marker=dict(color="red", size=10, symbol="x")))
+
     fig.update_layout(template="plotly_dark", height=500, hovermode="x unified", yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig, use_container_width=True)
     
-    # 3. 1-Day Contextual Demand Charts (Bottom of Tab 1)
+    # 3. 1-Day Contextual Demand Charts
     st.divider()
-    st.subheader("Daily Demand Overview (1-Day Resolution)")
+    st.subheader("Daily Demand Overview")
     c_l, c_r = st.columns(2)
     with c_l: st.plotly_chart(px.line(df, x="Date", y="Demand", title="Demand Over Time", color_discrete_sequence=['#AB63FA']).update_layout(template="plotly_dark", height=300), use_container_width=True)
     with c_r: st.plotly_chart(px.histogram(df, x="Demand", title="Demand Frequency", color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=300), use_container_width=True)
@@ -164,7 +170,7 @@ with t2:
 
     st.divider()
     
-    # 2. Service Level Histogram (Re-calculates based on Window)
+    # 2. Service Level Histogram
     st.subheader("Service Level Analysis")
     h_col, s_col = st.columns([1, 2])
     with h_col: hist_mode = st.radio("Focus:", ["Daily Demand", f"{window_size}-Day Window Sum"])
