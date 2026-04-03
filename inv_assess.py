@@ -146,8 +146,8 @@ with t1:
         f1.metric("Total Holding Cost", f"${df['HoldingCost'].sum():,.0f}")
         f2.metric("Total Ordering Cost", f"${df['OrderingCost'].sum():,.0f}")
         f3.metric("Total Policy Cost", f"${total_cost_curr:,.0f}")
-        f4.metric("Avg Total WC (Position)", f"${(df['Position'].mean()*unit_value):,.0f}")
-        f5.metric("Inv Turnover", f"{(annual_d / df['Inventory'].mean() if df['Inventory'].mean() > 0 else 0):.1f}x")
+        # f4.metric("Avg Total WC (Position)", f"${(df['Position'].mean()*unit_value):,.0f}")
+        # f5.metric("Inv Turnover", f"{(annual_d / df['Inventory'].mean() if df['Inventory'].mean() > 0 else 0):.1f}x")
 
         st.write("### EOQ Strategy Comparison")
         e1, e2, e3, e4, e5 = st.columns(5)
