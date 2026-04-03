@@ -221,26 +221,40 @@ with t1:
 
 with t2:
     st.title("Risk & Window Analysis")
+    
+    # CRITICAL: Define window_size here since it's used in this tab
     window_size = st.slider("Select Analysis Window (Days)", 1, 30, 7)
     
+    # 1. Block Volume Analysis
     st.subheader(f"Demand Volume in {window_size}-Day Blocks")
     df['Block_Group'] = np.arange(len(df)) // window_size
     block_df = df.groupby('Block_Group').agg({'Date': 'first', 'Demand': 'sum'}).reset_index()
     fig_blocks = px.bar(block_df, x='Date', y='Demand', color_discrete_sequence=['#50C878'])
-    fig_blocks.update_layout(template="plotly_dark", height=400)
+    fig_blocks.update_layout(template="plotly_dark", height=400, xaxis_title="Timeline", yaxis_title="Sum of Demand")
     st.plotly_chart(fig_blocks, use_container_width=True)
 
     st.divider()
 
+    # 2. Risk Gap Analysis
     st.subheader("Service Level vs. Maximum Exposure")
     df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
     hist_data = df['RollSum'].dropna()
-    target_sl = st.slider("Target Service Level", 0.50, 0.99, 0.95, step=0.01, format="%.2f")
+    # Updated Slider Logic
+    target_sl = st.slider(
+        "Target Service Level", 
+        min_value=0.50, 
+        max_value=0.99, 
+        value=0.95, 
+        step=0.01,
+        format="%.2f" # This ensures it displays as 0.95 instead of 0.9500001
+    )
     
+    # Logic for Risk Gap (remains the same)
     cutoff = np.percentile(hist_data, target_sl * 100)
     max_demand = hist_data.max()
     risk_gap = max_demand - cutoff
     
+    # Metric Row
     r1, r2, r3, r4 = st.columns(4)
     r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff)} Units")
     r2.metric("Max Demand Observed", f"{int(max_demand)} Units")
