@@ -205,89 +205,42 @@ with t1:
 
 # --- TAB 2: RISK ANALYZER ---
 # --- TAB 2: DEMAND ANALYZER ---
+# --- TAB 2: DEMAND ANALYZER ---
 with t2:
     st.title("Risk & Window Analysis")
     
+    # CRITICAL: Define window_size here since it's used in this tab
+    window_size = st.slider("Select Analysis Window (Days)", 1, 30, 7)
+    
     # 1. Block Volume Analysis
     st.subheader(f"Demand Volume in {window_size}-Day Blocks")
-    
-    # Grouping logic: Create a group ID for every N days based on sidebar window_size
     df['Block_Group'] = np.arange(len(df)) // window_size
-    block_df = df.groupby('Block_Group').agg({
-        'Date': 'first',
-        'Demand': 'sum'
-    }).reset_index()
-
-    fig_blocks = px.bar(
-        block_df, 
-        x='Date', 
-        y='Demand', 
-        color_discrete_sequence=['#50C878'], # Emerald Green
-        labels={'Demand': 'Total Units', 'Date': 'Block Start Date'}
-    )
-
-    fig_blocks.update_layout(
-        template="plotly_dark", 
-        height=400,
-        xaxis_title="Timeline",
-        yaxis_title="Sum of Demand",
-        bargap=0.2,
-        hovermode="x"
-    )
+    block_df = df.groupby('Block_Group').agg({'Date': 'first', 'Demand': 'sum'}).reset_index()
+    fig_blocks = px.bar(block_df, x='Date', y='Demand', color_discrete_sequence=['#50C878'])
+    fig_blocks.update_layout(template="plotly_dark", height=400, xaxis_title="Timeline", yaxis_title="Sum of Demand")
     st.plotly_chart(fig_blocks, use_container_width=True)
 
     st.divider()
 
-    # 2. Service Level & Risk Gap Analysis
+    # 2. Risk Gap Analysis
     st.subheader("Service Level vs. Maximum Exposure")
-    
-    # Calculate rolling sum for the selected window
     df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
     hist_data = df['RollSum'].dropna()
-    
-    # Slider for Target Service Level
     target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
     
-    # Logic for Risk Gap
     cutoff = np.percentile(hist_data, target_sl * 100)
     max_demand = hist_data.max()
     risk_gap = max_demand - cutoff
 
-    # Metric Row
     r1, r2, r3, r4 = st.columns(4)
     r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff)} Units")
     r2.metric("Max Demand Observed", f"{int(max_demand)} Units")
     r3.metric("The Risk Gap", f"{int(risk_gap)} Units", delta="Uncovered", delta_color="inverse")
     r4.metric("Risk Value Exposure", f"${int(risk_gap * unit_value):,}")
 
-    # 3. Distribution Histogram with Shaded Risk Zone
-    fig_risk = px.histogram(
-        hist_data, 
-        nbins=30, 
-        color_discrete_sequence=['#00CC96'], 
-        title=f"Demand Distribution over {window_size}-Day Window"
-    )
-    
-    # Add vertical lines for SL and Max
-    fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="yellow", 
-                       annotation_text=f"{int(target_sl*100)}% Service Level")
-    fig_risk.add_vline(x=max_demand, line_dash="dot", line_color="red", 
-                       annotation_text="Absolute MAX")
-    
-    # Highlight the Risk Area (The Gap)
-    fig_risk.add_vrect(
-        x0=cutoff, x1=max_demand, 
-        fillcolor="red", opacity=0.15, 
-        layer="below", line_width=0, 
-        annotation_text="UNPROTECTED ZONE"
-    )
-    
-    fig_risk.update_layout(
-        template="plotly_dark", 
-        height=450, 
-        xaxis_title="Units Demanded in Window",
-        yaxis_title="Frequency"
-    )
+    fig_risk = px.histogram(hist_data, nbins=30, color_discrete_sequence=['#00CC96'], title=f"Demand Distribution over {window_size}-Day Window")
+    fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="yellow", annotation_text=f"{int(target_sl*100)}% SL")
+    fig_risk.add_vline(x=max_demand, line_dash="dot", line_color="red", annotation_text="Absolute MAX")
+    fig_risk.add_vrect(x0=cutoff, x1=max_demand, fillcolor="red", opacity=0.15, layer="below", line_width=0, annotation_text="UNPROTECTED ZONE")
+    fig_risk.update_layout(template="plotly_dark", height=450)
     st.plotly_chart(fig_risk, use_container_width=True)
-
-    st.info(f"💡 Explanation: The **Emerald Bars** above show total demand in {window_size}-day chunks. The **Histogram** below shows how often those totals occur. The **Red Shaded Zone** represents the potential stockout volume if demand hits historical peaks above your selected {int(target_sl*100)}% service level.")
