@@ -14,7 +14,7 @@ st.markdown(
     """
     <style>
     .block-container { padding: 2rem 5rem; }
-    section[data-testid="stSidebar"] > div:first-child { padding-left: 2.5rem !important; }
+    section[data-testid="stSidebar"] > div:first-child { padding-left: 3.5rem !important; }
     
     [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #FFFFFF !important; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold !important; color: #9ea4ad !important; }
@@ -32,16 +32,16 @@ st.markdown(
 # ------------------------------------------------
 st.sidebar.header("Simulation Settings")
 avg_demand = st.sidebar.number_input("Average Daily Demand", value=25.0, key="avg_val")
-cov = st.sidebar.number_input("CoV", value=0.1, step=0.1, key="cov_val")
+cov = st.sidebar.number_input("CoV", value=0.0, step=0.1, key="cov_val")
 num_days = st.sidebar.slider("Horizon (Days)", 10, 1000, 100)
 regen_button = st.sidebar.button("Reset Demand Scenario")
 
 st.sidebar.divider()
 st.sidebar.header("Policy & Costs")
-opening_balance = st.sidebar.number_input("Opening Balance", value=1000)
-lead_time = st.sidebar.number_input("Lead Time (Days)", value=10)
-reorder_point = st.sidebar.number_input("Reorder Point (ROP)", value=700)
-order_qty = st.sidebar.number_input("Order Quantity (Q)", value=300)
+opening_balance = st.sidebar.number_input("Opening Balance", value=300)
+lead_time = st.sidebar.number_input("Lead Time (Days)", value=3)
+reorder_point = st.sidebar.number_input("Reorder Point (ROP)", value=150)
+order_qty = st.sidebar.number_input("Order Quantity (Q)", value=200)
 unit_value = st.sidebar.number_input("Value Per Unit ($)", value=100)
 holding_cost_pct = st.sidebar.number_input("Annual Holding Cost %", value=20.0)
 ordering_cost = st.sidebar.number_input("Cost Per Order ($)", value=500)
@@ -204,20 +204,53 @@ with t1:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 # --- TAB 2: RISK ANALYZER ---
+# --- TAB 2: DEMAND ANALYZER ---
+# --- TAB 2: DEMAND ANALYZER ---
 with t2:
     st.title("Risk & Window Analysis")
-    window_days = st.slider("Select Analysis Window (Days)", 1, 30, 7)
-    df['RollSum'] = df['Demand'].rolling(window=window_days).sum()
+    
+    # CRITICAL: Define window_size here since it's used in this tab
+    window_size = st.slider("Select Analysis Window (Days)", 1, 30, 7)
+    
+    # 1. Block Volume Analysis
+    st.subheader(f"Demand Volume in {window_size}-Day Blocks")
+    df['Block_Group'] = np.arange(len(df)) // window_size
+    block_df = df.groupby('Block_Group').agg({'Date': 'first', 'Demand': 'sum'}).reset_index()
+    fig_blocks = px.bar(block_df, x='Date', y='Demand', color_discrete_sequence=['#50C878'])
+    fig_blocks.update_layout(template="plotly_dark", height=400, xaxis_title="Timeline", yaxis_title="Sum of Demand")
+    st.plotly_chart(fig_blocks, use_container_width=True)
+
+    st.divider()
+
+    # 2. Risk Gap Analysis
+    st.subheader("Service Level vs. Maximum Exposure")
+    df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
     hist_data = df['RollSum'].dropna()
-    target_sl = st.select_slider("Target Service Level", options=[0.80, 0.90, 0.95, 0.99], value=0.95)
+    # Updated Slider Logic
+    target_sl = st.slider(
+        "Target Service Level", 
+        min_value=0.50, 
+        max_value=0.99, 
+        value=0.95, 
+        step=0.01,
+        format="%.2f" # This ensures it displays as 0.95 instead of 0.9500001
+    )
+    
+    # Logic for Risk Gap (remains the same)
     cutoff = np.percentile(hist_data, target_sl * 100)
+    max_demand = hist_data.max()
+    risk_gap = max_demand - cutoff
     
-    r_sl, r_mx, r_gp = st.columns(3)
-    r_sl.metric(f"{int(target_sl*100)}% SL Threshold", int(cutoff))
-    r_mx.metric("Max Demand in Window", int(hist_data.max()))
-    r_gp.metric("Units Exposed", int(hist_data.max() - cutoff), delta="Risk", delta_color="inverse")
-    
-    fig_risk = px.histogram(hist_data, nbins=25, color_discrete_sequence=['#00CC96'], title=f"{window_days}-Day Window Demand Distribution")
-    fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="red", annotation_text="Target SL")
+    # Metric Row
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff)} Units")
+    r2.metric("Max Demand Observed", f"{int(max_demand)} Units")
+    r3.metric("The Risk Gap", f"{int(risk_gap)} Units", delta="Uncovered", delta_color="inverse")
+    r4.metric("Risk Value Exposure", f"${int(risk_gap * unit_value):,}")
+
+    fig_risk = px.histogram(hist_data, nbins=30, color_discrete_sequence=['#00CC96'], title=f"Demand Distribution over {window_size}-Day Window")
+    fig_risk.add_vline(x=cutoff, line_dash="dash", line_color="yellow", annotation_text=f"{int(target_sl*100)}% SL")
+    fig_risk.add_vline(x=max_demand, line_dash="dot", line_color="red", annotation_text="Absolute MAX")
+    fig_risk.add_vrect(x0=cutoff, x1=max_demand, fillcolor="red", opacity=0.15, layer="below", line_width=0, annotation_text="UNPROTECTED ZONE")
     fig_risk.update_layout(template="plotly_dark", height=450)
     st.plotly_chart(fig_risk, use_container_width=True)
