@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import io
 
 # ------------------------------------------------
-# 1. Page Config & Custom Styling (Zoom-Ready)
+# 1. Page Config & Custom Styling
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Inventory Simulator Pro")
 
@@ -39,7 +39,7 @@ num_days = st.sidebar.slider("Horizon (Days)", 10, 1000, 100)
 regen_button = st.sidebar.button("🔄 Regenerate Demand")
 
 st.sidebar.divider()
-st.sidebar.header("Analysis Window")
+st.sidebar.header("Analysis Settings")
 window_size = st.sidebar.slider("Rolling Window Size (Days)", 1, 30, 7)
 fixed_zero = st.sidebar.checkbox("Start Y-Axis at Zero", value=True)
 
@@ -72,9 +72,10 @@ def run_sim():
     rows = []
     d_seq = st.session_state.demand_seq
     d_dates = st.session_state.demand_dates
+    daily_h_rate = (holding_cost_pct / 100) / 365
 
     for day in range(len(d_seq)):
-        # Arrivals at START of day
+        # A. Start of day Arrivals
         received = sum(o[1] for o in pipeline if o[0] == day)
         pipeline = [o for o in pipeline if o[0] != day]
         inv += received
@@ -82,30 +83,31 @@ def run_sim():
         opening = inv
         demand = d_seq[day]
         
-        # Calculate Position BEFORE satisfying demand for reorder check
-        current_pipeline_qty = sum(o[1] for o in pipeline)
-        pos_at_check = inv + current_pipeline_qty
-        
-        # Trigger Order (Position <= ROP)
+        # B. TRIGGER CHECK (Physical <= ROP and No Order currently in lead time)
+        is_already_ordered = len(pipeline) > 0
         placed_qty = 0
-        if pos_at_check <= reorder_point:
+        order_expense = 0
+        if inv <= reorder_point and not is_already_ordered:
             placed_qty = order_qty
             pipeline.append((day + lead_time, placed_qty))
+            order_expense = ordering_cost
             
-        # Satisfy Demand
+        # C. Satisfy Demand
         is_unfulfilled = demand > inv
         shortage = max(0, demand - inv)
         inv = max(0, inv - demand)
         
-        # End of day pipeline
+        # D. Financials
+        h_cost = inv * unit_value * daily_h_rate
         final_pipeline_qty = sum(o[1] for o in pipeline)
         
         rows.append({
-            "Date": d_dates[day].date(), "Opening": opening, "Demand": demand, 
-            "Shortage": shortage, "Is Stockout": is_unfulfilled, "Inventory": inv, 
+            "Date": d_dates[day].date(), "Demand": demand, "Shortage": shortage, 
+            "Is Stockout": is_unfulfilled, "Inventory": inv, 
             "Pipeline Inventory": final_pipeline_qty,
             "Position": inv + final_pipeline_qty, 
-            "Order": placed_qty, "InLT": final_pipeline_qty > 0
+            "Order": placed_qty, "InLT": final_pipeline_qty > 0,
+            "Holding Cost": h_cost, "Ordering Cost": order_expense
         })
     return pd.DataFrame(rows)
 
@@ -117,16 +119,18 @@ df = run_sim()
 t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
 with t1:
-    # 1. Metrics
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Stockout Days", df["Is Stockout"].sum())
-    m2.metric("Fill Rate", f"{((df['Demand'].sum()-df['Shortage'].sum())/df['Demand'].sum()*100):.1f}%")
-    m3.metric("Min Stock", int(df["Inventory"].min()))
-    m4.metric("Avg Stock", int(df["Inventory"].mean()))
-    m5.metric("Total Cost", f"${int((df['Position'].mean()*unit_value*holding_cost_pct/100) + ((df['Order']>0).sum()*ordering_cost)):,}")
+    # COLLAPSABLE KPI SECTION
+    with st.expander("🚀 Summary Performance Metrics", expanded=True):
+        m1, m2, m3, m4 = st.columns(4)
+        total_h = df["Holding Cost"].sum()
+        total_o = df["Ordering Cost"].sum()
+        m1.metric("Stockout Days", df["Is Stockout"].sum(), delta="Demand > Supply", delta_color="inverse")
+        m2.metric("Fill Rate", f"{((df['Demand'].sum()-df['Shortage'].sum())/df['Demand'].sum()*100):.1f}%")
+        m3.metric("Total Holding Cost", f"${int(total_h):,}")
+        m4.metric("Total Ordering Cost", f"${int(total_o):,}")
 
-    # 2. Main Simulator Chart
-    st.subheader("Inventory Levels & Position")
+    # Main Simulation Chart
+    st.subheader("Inventory Levels & Reorder Position")
     fig = go.Figure()
     for i, r in df.iterrows():
         if r["InLT"]: fig.add_vrect(x0=r["Date"], x1=r["Date"], fillcolor="red", opacity=0.05, layer="below", line_width=0)
@@ -135,59 +139,57 @@ with t1:
     fig.add_trace(go.Scatter(x=df["Date"], y=df["Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
     fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
     
-    # Order & Shortage Markers
+    # Order markers
     orders = df[df["Order"] > 0]
     if not orders.empty:
-        fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Triggered", 
-                                 text=[f"Order Qty: {order_qty}<br>Total Position: {p}" for p in orders["Position"]],
-                                 hovertemplate="<b>%{x}</b><br>%{text}<br>Physical Stock: %{y}<extra></extra>",
+        fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Placed", 
+                                 text=[f"Order Qty: {order_qty}" for _ in range(len(orders))],
                                  marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
     
+    # Stockout markers
     shorts = df[df["Is Stockout"] == True]
     if not shorts.empty:
-        fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", marker=dict(color="red", size=10, symbol="x")))
+        fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage (Stockout)", 
+                                 marker=dict(color="red", size=10, symbol="x")))
 
     fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", yaxis=dict(rangemode="tozero" if fixed_zero else "normal"))
     st.plotly_chart(fig, use_container_width=True)
-    
-    # 3. Standalone Pipeline Graph
-    st.subheader("Total Pipeline Inventory (Units on Order)")
-    fig_pipe = px.area(df, x="Date", y="Pipeline Inventory", color_discrete_sequence=['#FFCC00'])
-    fig_pipe.update_layout(template="plotly_dark", height=300, yaxis=dict(rangemode="tozero"))
-    st.plotly_chart(fig_pipe, use_container_width=True)
-    
-    # 4. Contextual Demand
-    st.divider()
-    cl, cr = st.columns(2)
-    with cl: st.plotly_chart(px.line(df, x="Date", y="Demand", title="Daily Volatility", color_discrete_sequence=['#AB63FA']).update_layout(template="plotly_dark", height=300), use_container_width=True)
-    with cr: st.plotly_chart(px.histogram(df, x="Demand", title="Daily Distribution", color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=300), use_container_width=True)
 
-    st.subheader("Data Table")
+    # Pipeline Chart
+    st.subheader("Total Pipeline Inventory (Units in Transit)")
+    st.plotly_chart(px.area(df, x="Date", y="Pipeline Inventory", color_discrete_sequence=['#FFCC00']).update_layout(template="plotly_dark", height=250), use_container_width=True)
+
+    # Financial Deep Dive
+    st.divider()
+    st.subheader("💰 Financial Analysis")
+    c_pie, c_bar = st.columns([1, 2])
+    with c_pie:
+        cost_df = pd.DataFrame({"Category": ["Holding", "Ordering"], "Value": [total_h, total_o]})
+        fig_pie = px.pie(cost_df, values='Value', names='Category', hole=0.4, color_discrete_sequence=['#00CC96', '#FF9900'])
+        fig_pie.update_layout(template="plotly_dark", showlegend=False, height=300)
+        st.plotly_chart(fig_pie, use_container_width=True)
+    with c_bar:
+        df['Cumulative Cost'] = (df['Holding Cost'] + df['Ordering Cost']).cumsum()
+        fig_cum = px.line(df, x="Date", y="Cumulative Cost", title="Cumulative Total Cost Profile")
+        fig_cum.update_layout(template="plotly_dark", height=300)
+        st.plotly_chart(fig_cum, use_container_width=True)
+
+    st.subheader("Detailed Simulation Logs")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 with t2:
-    st.title("Demand Risk Deep Dive")
+    st.title("Demand & Risk Analysis")
     df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
-    st.subheader(f"Demand Volume in {window_size}-Day Blocks")
-    df['Window_Group'] = np.arange(len(df)) // window_size
-    window_totals = df.groupby('Window_Group').agg({'Demand': 'sum', 'Date': 'first'}).reset_index()
-    st.plotly_chart(px.bar(window_totals, x='Date', y='Demand', color_discrete_sequence=['#00CC96']).update_layout(template="plotly_dark", height=400), use_container_width=True)
-
-    st.divider()
-    st.subheader("Service Level Histogram")
-    h_col, s_col = st.columns([1, 2])
-    with h_col: hist_mode = st.radio("Focus:", ["Daily Demand", f"{window_size}-Day Window Sum"])
-    with s_col: target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
-
-    hist_data = df["Demand"] if hist_mode == "Daily Demand" else df["RollSum"].dropna()
+    target_sl = st.select_slider("Target Service Level", options=[0.80, 0.90, 0.95, 0.99], value=0.95)
+    hist_data = df['RollSum'].dropna()
     cutoff = np.percentile(hist_data, target_sl * 100)
     
     r1, r2, r3 = st.columns(3)
     r1.metric(f"{int(target_sl*100)}% SL Threshold", int(cutoff))
-    r2.metric("Max Demand", int(hist_data.max()))
-    r3.metric("Exposure Gap", int(hist_data.max() - cutoff), delta="Risk", delta_color="inverse")
-
-    fig_h = px.histogram(hist_data, nbins=30, color_discrete_sequence=['#00CC96'], marginal="box")
-    fig_h.add_vline(x=cutoff, line_dash="dash", line_color="red", annotation_text="Target SL")
-    fig_h.update_layout(template="plotly_dark", height=450, bargap=0.1)
+    r2.metric("Max Demand Observed", int(hist_data.max()))
+    r3.metric("Uncovered Exposure", int(hist_data.max() - cutoff), delta="Units at Risk", delta_color="inverse")
+    
+    fig_h = px.histogram(hist_data, nbins=20, color_discrete_sequence=['#00CC96'], marginal="box")
+    fig_h.add_vline(x=cutoff, line_dash="dash", line_color="red", annotation_text="Service Level Target")
+    fig_h.update_layout(template="plotly_dark", height=450, xaxis_title=f"Units in {window_size}-Day Window")
     st.plotly_chart(fig_h, use_container_width=True)
