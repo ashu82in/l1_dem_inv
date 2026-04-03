@@ -204,32 +204,71 @@ with t1:
     st.divider()
 
     # CHARTS (FULL RESTORATION OF MARKERS & SHADING)
-    st.subheader("Inventory Levels Over Time")
-    fig = go.Figure()
-    
-    # Fast Vectorized Shading
-    fig.add_trace(go.Scatter(
-        x=df["Date"], y=np.where(df["InLT"], df["Position"].max(), np.nan),
-        fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.05)', line=dict(width=0), 
-        name="Lead Time Window", showlegend=False, hoverinfo='skip'
-    ))
-    
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Inventory"], name="Physical Stock", line=dict(color='#00CCFF', width=2.5)))
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Position"], name="Inventory Position", line=dict(color='#FF9900', dash='dot')))
-    fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
-    
-    # Vectorized Event Markers
-    orders = df[df["Order"] > 0]
-    if not orders.empty:
-        fig.add_trace(go.Scatter(x=orders["Date"], y=orders["Inventory"], mode="markers", name="Order Placed", 
-                                 marker=dict(color="#00FF00", size=10, symbol="triangle-up")))
-    shorts = df[df["IsStockout"]]
-    if not shorts.empty:
-        fig.add_trace(go.Scatter(x=shorts["Date"], y=shorts["Inventory"], mode="markers", name="Shortage", 
-                                 marker=dict(color="red", size=10, symbol="x")))
+# --- MAIN INVENTORY CHART (FIXED RENDER MODE) ---
+st.subheader("Inventory Levels Over Time")
+fig = go.Figure()
 
-    fig.update_layout(template="plotly_dark", height=450, hovermode="x unified", render_mode='webgl')
-    st.plotly_chart(fig, use_container_width=True)
+# 1. Fast Vectorized Shading
+fig.add_trace(go.Scatter(
+    x=df["Date"], 
+    y=np.where(df["InLT"], df["Position"].max(), np.nan),
+    fill='tozeroy', 
+    fillcolor='rgba(255, 0, 0, 0.05)', 
+    line=dict(width=0), 
+    name="Lead Time Window", 
+    showlegend=False, 
+    hoverinfo='skip'
+))
+
+# 2. Main Lines
+fig.add_trace(go.Scatter(
+    x=df["Date"], 
+    y=df["Inventory"], 
+    name="Physical Stock", 
+    line=dict(color='#00CCFF', width=2.5)
+))
+
+fig.add_trace(go.Scatter(
+    x=df["Date"], 
+    y=df["Position"], 
+    name="Inventory Position", 
+    line=dict(color='#FF9900', dash='dot')
+))
+
+fig.add_hline(y=reorder_point, line_dash="dash", line_color="red", annotation_text="ROP")
+
+# 3. Vectorized Event Markers
+orders = df[df["Order"] > 0]
+if not orders.empty:
+    fig.add_trace(go.Scatter(
+        x=orders["Date"], y=orders["Inventory"], 
+        mode="markers", name="Order Placed", 
+        marker=dict(color="#00FF00", size=10, symbol="triangle-up")
+    ))
+
+shorts = df[df["IsStockout"]]
+if not shorts.empty:
+    fig.add_trace(go.Scatter(
+        x=shorts["Date"], y=shorts["Inventory"], 
+        mode="markers", name="Shortage", 
+        marker=dict(color="red", size=10, symbol="x")
+    ))
+
+# --- THE CORRECTION ---
+# We apply WebGL to all scatter traces at once
+fig.update_traces(patch={"line": {"shape": "linear"}}, selector=dict(type='scatter'))
+
+fig.update_layout(
+    template="plotly_dark", 
+    height=450, 
+    hovermode="x unified",
+    # Remove 'render_mode' from here; it's not a layout property
+)
+
+# Alternative way to force WebGL if the above doesn't feel fast enough:
+# use_container_width=True
+st.plotly_chart(fig, use_container_width=True)
+
     # st.subheader("Inventory Levels Over Time")
     # fig = go.Figure()
     # # Shading for Lead Time Windows
