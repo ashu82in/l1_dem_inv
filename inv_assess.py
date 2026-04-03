@@ -101,24 +101,24 @@ def run_sim_fast(q_val, _demand_seq, _demand_dates, op_bal, lt, rop, u_val, h_pc
     return df_res
 
 # ------------------------------------------------
-# 4. State Management
+# 4. State Management (FIXED FOR DYNAMIC UPDATES)
 # ------------------------------------------------
-if "demand_seq" not in st.session_state or regen_button:
+# We track changes to these 3 variables to force a refresh when sliders move
+current_params = (avg_demand, cov, num_days)
+
+if "demand_params" not in st.session_state or st.session_state.demand_params != current_params or regen_button:
+    # 1. Logic for Demand Generation
     if cov <= 0:
         st.session_state.demand_seq = np.full(num_days, float(avg_demand))
     else:
+        # This creates the actual volatility (zigzag line)
         st.session_state.demand_seq = np.maximum(0, np.random.normal(avg_demand, avg_demand * cov, num_days)).round()
+    
+    # 2. Logic for Dates
     st.session_state.demand_dates = pd.date_range(start="2024-01-01", periods=num_days)
-
-# Run Simulations
-df = run_sim_fast(order_qty, st.session_state.demand_seq, st.session_state.demand_dates, 
-                  opening_balance, lead_time, reorder_point, unit_value, holding_cost_pct, ordering_cost)
-
-annual_d = avg_demand * 365
-annual_h = unit_value * (holding_cost_pct / 100)
-eoq_val = np.sqrt((2 * annual_d * ordering_cost) / annual_h)
-eoq_df = run_sim_fast(eoq_val, st.session_state.demand_seq, st.session_state.demand_dates, 
-                      opening_balance, lead_time, reorder_point, unit_value, holding_cost_pct, ordering_cost)
+    
+    # 3. Save current settings so we can detect the NEXT change
+    st.session_state.demand_params = current_params
 
 # ------------------------------------------------
 # 5. UI Layout (FULLY RESTORED)
