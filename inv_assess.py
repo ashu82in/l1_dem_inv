@@ -226,12 +226,22 @@ with t2:
     st.subheader("Service Level vs. Maximum Exposure")
     df['RollSum'] = df['Demand'].rolling(window=window_size).sum()
     hist_data = df['RollSum'].dropna()
-    target_sl = st.select_slider("Target Service Level", options=[0.80, 0.85, 0.90, 0.95, 0.98, 0.99], value=0.95)
+    # Updated Slider Logic
+    target_sl = st.slider(
+        "Target Service Level", 
+        min_value=0.50, 
+        max_value=0.99, 
+        value=0.95, 
+        step=0.01,
+        format="%.2f" # This ensures it displays as 0.95 instead of 0.9500001
+    )
     
+    # Logic for Risk Gap (remains the same)
     cutoff = np.percentile(hist_data, target_sl * 100)
     max_demand = hist_data.max()
     risk_gap = max_demand - cutoff
-
+    
+    # Metric Row
     r1, r2, r3, r4 = st.columns(4)
     r1.metric(f"{int(target_sl*100)}% SL Threshold", f"{int(cutoff)} Units")
     r2.metric("Max Demand Observed", f"{int(max_demand)} Units")
