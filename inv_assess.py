@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import io
 
 # ------------------------------------------------
 # 1. Page Config & Styling (RESTORED)
@@ -160,11 +161,12 @@ t1, t2, t3 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer", "🕵�
 # ------------------------------------------------
 # 6. Tab 3: Pattern Decoder (NEW)
 # ------------------------------------------------
+
+
 def render_pattern_decoder():
     st.header("🕵️ The Pattern Decoder: Beyond the Average")
     st.info("""
-    **The Learning Goal:** Most founders look at an 'Average' and think they are safe. 
-    Here, we prove that an average is a lie in a seasonal business.
+    **The Learning Goal:** Prove that an 'Average' is a dangerous lie in a seasonal business.
     """)
 
     # --- 1. DATA GENERATOR ---
@@ -178,10 +180,7 @@ def render_pattern_decoder():
             dec_boost = st.slider("Peak Season Surge (%)", 20, 150, 60, key="dec_boost") / 100
 
         if st.button("✨ Generate Seasonal Pattern"):
-            # Setup 2 years (730 days) for clear seasonality
             dates = pd.date_range("2024-01-01", periods=730)
-            
-            # Generate a Sine Wave for seasonality (2 cycles for 2 years)
             t = np.linspace(0, 4 * np.pi, 730)
             wave = np.sin(t)
             
@@ -189,25 +188,20 @@ def render_pattern_decoder():
             labels = []
             
             for w in wave:
-                # Determine Seasonality Tier
                 if w > 0.5:
-                    tier = "High"
-                    multiplier = 1 + dec_boost
+                    tier, mult = "High", 1 + dec_boost
                 elif w < -0.5:
-                    tier = "Low"
-                    multiplier = 1 - (dec_boost * 0.6) # Troughs aren't usually as deep as peaks
+                    tier, mult = "Low", 1 - (dec_boost * 0.6)
                 else:
-                    tier = "Normal"
-                    multiplier = 1.0
+                    tier, mult = "Normal", 1.0
                 
-                # Add randomness to the scaled demand
-                daily_demand = np.random.normal(dec_avg * multiplier, dec_avg * dec_cov)
+                daily_demand = np.random.normal(dec_avg * mult, dec_avg * dec_cov)
                 final_demand.append(max(0, daily_demand))
                 labels.append(tier)
             
             st.session_state.decoder_df = pd.DataFrame({
                 "Date": dates,
-                "Demand": final_demand,
+                "Demand": np.round(final_demand, 0),
                 "Seasonality": labels
             })
 
@@ -215,10 +209,24 @@ def render_pattern_decoder():
     if "decoder_df" in st.session_state:
         df_dec = st.session_state.decoder_df
         
-        # STAGE 1: RAW DATA
+        # STAGE 1: RAW DATA & DOWNLOAD
         st.subheader("Stage 1: The 'Spreadsheet Blindness'")
-        st.write("Just looking at rows of data provides zero insight into the 'Pulse' of the factory.")
-        st.dataframe(df_dec.head(10), use_container_width=True, hide_index=True)
+        
+        # --- EXCEL DOWNLOAD LOGIC ---
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df_dec.to_excel(writer, index=False, sheet_name='Seasonal_Demand')
+            # The close() is handled by the context manager
+            
+        st.download_button(
+            label="📥 Download Demand Data as Excel",
+            data=buffer.getvalue(),
+            file_name="seasonal_demand_analysis.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        # Scrollable Dataframe (height=300 makes it explicitly scrollable)
+        st.dataframe(df_dec, use_container_width=True, hide_index=True, height=300)
 
         # STAGE 2: LINE PLOT
         st.divider()
@@ -229,31 +237,25 @@ def render_pattern_decoder():
                                color_discrete_sequence=['#A0AEC0'])
             fig_line.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_line, use_container_width=True)
-            st.write("**Insight:** Now we see waves. But we still don't know the *Probability* of hitting a specific high number.")
 
         # STAGE 3: THE HISTOGRAM COMPARISON
         st.divider()
         st.subheader("Stage 3: The Probability Truth")
-        
         col_all, col_sep = st.columns(2)
         
         with col_all:
             st.write("**A. The General Histogram**")
-            fig_h1 = px.histogram(df_dec, x="Demand", nbins=40, title="Total Data (The Smear)",
-                                  color_discrete_sequence=['#63B3ED'])
+            fig_h1 = px.histogram(df_dec, x="Demand", nbins=40, color_discrete_sequence=['#63B3ED'])
             fig_h1.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_h1, use_container_width=True)
-            st.caption("This 'Average' is a dangerous mix of different market realities.")
 
         with col_sep:
             st.write("**B. The Seasonal Breakdown**")
             fig_h2 = px.histogram(df_dec, x="Demand", color="Seasonality", nbins=40,
-                                  title="Data Separated by Season",
                                   color_discrete_map={"High": "#F56565", "Normal": "#63B3ED", "Low": "#4FD1C5"},
                                   barmode='overlay', opacity=0.75)
             fig_h2.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_h2, use_container_width=True)
-            st.caption("The Red and Green bells prove you need 3 different stock strategies, not one.")
 
 #End of Tab 3 function
 
