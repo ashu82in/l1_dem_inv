@@ -155,6 +155,107 @@ eoq_df = run_sim_fast(
 # ------------------------------------------------
 t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
 
+
+# ------------------------------------------------
+# 6. Tab 3: Pattern Decoder (NEW)
+# ------------------------------------------------
+def render_pattern_decoder():
+    st.header("🕵️ The Pattern Decoder: Beyond the Average")
+    st.info("""
+    **The Learning Goal:** Most founders look at an 'Average' and think they are safe. 
+    Here, we prove that an average is a lie in a seasonal business.
+    """)
+
+    # --- 1. DATA GENERATOR ---
+    with st.expander("🛠️ Step 1: Create your Market DNA", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            dec_avg = st.number_input("Baseline Daily Demand", value=500, key="dec_avg")
+        with c2:
+            dec_cov = st.slider("Chaos % (CoV)", 0.05, 0.50, 0.15, key="dec_cov")
+        with c3:
+            dec_boost = st.slider("Peak Season Surge (%)", 20, 150, 60, key="dec_boost") / 100
+
+        if st.button("✨ Generate Seasonal Pattern"):
+            # Setup 2 years (730 days) for clear seasonality
+            dates = pd.date_range("2024-01-01", periods=730)
+            
+            # Generate a Sine Wave for seasonality (2 cycles for 2 years)
+            t = np.linspace(0, 4 * np.pi, 730)
+            wave = np.sin(t)
+            
+            final_demand = []
+            labels = []
+            
+            for w in wave:
+                # Determine Seasonality Tier
+                if w > 0.5:
+                    tier = "High"
+                    multiplier = 1 + dec_boost
+                elif w < -0.5:
+                    tier = "Low"
+                    multiplier = 1 - (dec_boost * 0.6) # Troughs aren't usually as deep as peaks
+                else:
+                    tier = "Normal"
+                    multiplier = 1.0
+                
+                # Add randomness to the scaled demand
+                daily_demand = np.random.normal(dec_avg * multiplier, dec_avg * dec_cov)
+                final_demand.append(max(0, daily_demand))
+                labels.append(tier)
+            
+            st.session_state.decoder_df = pd.DataFrame({
+                "Date": dates,
+                "Demand": final_demand,
+                "Seasonality": labels
+            })
+
+    # --- 2. THE 3-STAGE ANALYSIS ---
+    if "decoder_df" in st.session_state:
+        df_dec = st.session_state.decoder_df
+        
+        # STAGE 1: RAW DATA
+        st.subheader("Stage 1: The 'Spreadsheet Blindness'")
+        st.write("Just looking at rows of data provides zero insight into the 'Pulse' of the factory.")
+        st.dataframe(df_dec.head(10), use_container_width=True, hide_index=True)
+
+        # STAGE 2: LINE PLOT
+        st.divider()
+        st.subheader("Stage 2: The 'Trend & Seasonality' View")
+        show_line = st.checkbox("🔍 Reveal Visual Pattern (Line Graph)", value=False)
+        if show_line:
+            fig_line = px.line(df_dec, x='Date', y='Demand', title="Demand Pulse Over 2 Years",
+                               color_discrete_sequence=['#A0AEC0'])
+            fig_line.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_line, use_container_width=True)
+            st.write("**Insight:** Now we see waves. But we still don't know the *Probability* of hitting a specific high number.")
+
+        # STAGE 3: THE HISTOGRAM COMPARISON
+        st.divider()
+        st.subheader("Stage 3: The Probability Truth")
+        
+        col_all, col_sep = st.columns(2)
+        
+        with col_all:
+            st.write("**A. The General Histogram**")
+            fig_h1 = px.histogram(df_dec, x="Demand", nbins=40, title="Total Data (The Smear)",
+                                  color_discrete_sequence=['#63B3ED'])
+            fig_h1.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_h1, use_container_width=True)
+            st.caption("This 'Average' is a dangerous mix of different market realities.")
+
+        with col_sep:
+            st.write("**B. The Seasonal Breakdown**")
+            fig_h2 = px.histogram(df_dec, x="Demand", color="Seasonality", nbins=40,
+                                  title="Data Separated by Season",
+                                  color_discrete_map={"High": "#F56565", "Normal": "#63B3ED", "Low": "#4FD1C5"},
+                                  barmode='overlay', opacity=0.75)
+            fig_h2.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_h2, use_container_width=True)
+            st.caption("The Red and Green bells prove you need 3 different stock strategies, not one.")
+
+#End of Tab 3 function
+
 with t1:
     st.write("### Inventory Dashboard Controls")
     use_pipeline = st.checkbox("Include Pipeline Inventory in KPIs", value=False)
@@ -382,3 +483,8 @@ with t2:
         
     else:
         st.warning("Please increase 'Horizon (Days)' in the sidebar to generate enough data for this window.")
+
+
+with t3:
+    # Call the new function
+    render_pattern_decoder()
