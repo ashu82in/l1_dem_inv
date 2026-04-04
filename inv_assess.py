@@ -153,7 +153,8 @@ eoq_df = run_sim_fast(
 # ------------------------------------------------
 # 5. UI Layout (FULLY RESTORED)
 # ------------------------------------------------
-t1, t2 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer"])
+# Update the tabs list
+t1, t2, t3 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer", "🕵️ Pattern Decoder"])
 
 
 # ------------------------------------------------
