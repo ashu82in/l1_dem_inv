@@ -163,13 +163,17 @@ t1, t2, t3 = st.tabs(["📊 Inventory Simulator", "📈 Demand Analyzer", "🕵�
 # ------------------------------------------------
 
 
+import io
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
 def render_pattern_decoder():
     st.header("🕵️ The Pattern Decoder: Beyond the Average")
-    st.info("""
-    **The Learning Goal:** Prove that an 'Average' is a dangerous lie in a seasonal business.
-    """)
+    st.info("The Goal: Prove that an 'Average' is a lie in a seasonal business.")
 
-    # --- 1. DATA GENERATOR ---
+    # --- 1. DATA GENERATOR (VECTORIZED) ---
     with st.expander("🛠️ Step 1: Create your Market DNA", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -180,28 +184,30 @@ def render_pattern_decoder():
             dec_boost = st.slider("Peak Season Surge (%)", 20, 150, 60, key="dec_boost") / 100
 
         if st.button("✨ Generate Seasonal Pattern"):
-            dates = pd.date_range("2024-01-01", periods=730)
-            t = np.linspace(0, 4 * np.pi, 730)
+            n_days = 730
+            dates = pd.date_range("2024-01-01", periods=n_days)
+            
+            # Vectorized Sine Wave Generation
+            t = np.linspace(0, 4 * np.pi, n_days)
             wave = np.sin(t)
             
-            final_demand = []
-            labels = []
+            # Vectorized Multiplier Logic using np.select
+            # This replaces the slow 'for' loop and 'if' statements
+            conditions = [ (wave > 0.5), (wave < -0.5) ]
+            multipliers = [ 1 + dec_boost, 1 - (dec_boost * 0.6) ]
+            scale_array = np.select(conditions, multipliers, default=1.0)
             
-            for w in wave:
-                if w > 0.5:
-                    tier, mult = "High", 1 + dec_boost
-                elif w < -0.5:
-                    tier, mult = "Low", 1 - (dec_boost * 0.6)
-                else:
-                    tier, mult = "Normal", 1.0
-                
-                daily_demand = np.random.normal(dec_avg * mult, dec_avg * dec_cov)
-                final_demand.append(max(0, daily_demand))
-                labels.append(tier)
+            # Vectorized Seasonality Labeling
+            label_choices = ["High", "Low"]
+            labels = np.select(conditions, label_choices, default="Normal")
+            
+            # Vectorized Normal Distribution Generation
+            # We generate all 730 random points at once scaled by our seasonality array
+            final_demand = np.random.normal(dec_avg * scale_array, dec_avg * dec_cov)
             
             st.session_state.decoder_df = pd.DataFrame({
                 "Date": dates,
-                "Demand": np.round(final_demand, 0),
+                "Demand": np.maximum(0, np.round(final_demand, 0)), # Vectorized clip and round
                 "Seasonality": labels
             })
 
@@ -212,11 +218,10 @@ def render_pattern_decoder():
         # STAGE 1: RAW DATA & DOWNLOAD
         st.subheader("Stage 1: The 'Spreadsheet Blindness'")
         
-        # --- EXCEL DOWNLOAD LOGIC ---
+        # Fast Buffer Export
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             df_dec.to_excel(writer, index=False, sheet_name='Seasonal_Demand')
-            # The close() is handled by the context manager
             
         st.download_button(
             label="📥 Download Demand Data as Excel",
@@ -225,17 +230,16 @@ def render_pattern_decoder():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-        # Scrollable Dataframe (height=300 makes it explicitly scrollable)
-        st.dataframe(df_dec, use_container_width=True, hide_index=True, height=300)
+        # Scrollable table with fixed height
+        st.dataframe(df_dec, use_container_width=True, hide_index=True, height=350)
 
         # STAGE 2: LINE PLOT
         st.divider()
         st.subheader("Stage 2: The 'Trend & Seasonality' View")
         show_line = st.checkbox("🔍 Reveal Visual Pattern (Line Graph)", value=False)
         if show_line:
-            fig_line = px.line(df_dec, x='Date', y='Demand', title="Demand Pulse Over 2 Years",
-                               color_discrete_sequence=['#A0AEC0'])
-            fig_line.update_layout(template="plotly_dark", height=400)
+            fig_line = px.line(df_dec, x='Date', y='Demand', color_discrete_sequence=['#A0AEC0'])
+            fig_line.update_layout(template="plotly_dark", height=400, hovermode="x")
             st.plotly_chart(fig_line, use_container_width=True)
 
         # STAGE 3: THE HISTOGRAM COMPARISON
@@ -256,7 +260,7 @@ def render_pattern_decoder():
                                   barmode='overlay', opacity=0.75)
             fig_h2.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_h2, use_container_width=True)
-
+            
 #End of Tab 3 function
 
 with t1:
