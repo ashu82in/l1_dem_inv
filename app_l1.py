@@ -1286,6 +1286,7 @@ with tab5:
         st.session_state.rop_audit_suite = max(0, int(raw_target_level))
 
     
+
     # --- HISTOGRAM EXPANDER ---
     with st.expander("📊 View Cleaned Demand Distribution & Best-Fit Curve Metrics", expanded=False):
         stat_col1, stat_col2, stat_col3 = st.columns(3)
@@ -1430,6 +1431,41 @@ with tab5:
     else:
         st.error(f"⚠️ **Operational Margin Deficit Risk:** This setup increases operational overhead by **${abs(true_net_benefit):,.2f} / year** compared to actuals.")
 
+
+    # =========================================================
+    # --- NEW: EXECUTIVE KPI SCORECARD ---
+    # =========================================================
+    st.markdown("### 🏆 Executive Summary: Value Realization")
+    
+    # Calculate Working Capital metrics for the scorecard
+    act_avg_wc = actual_avg_inventory * item_unit_cost
+    opt_avg_wc = simmed_avg_opt_inv * item_unit_cost
+    cash_released = act_avg_wc - opt_avg_wc
+
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+
+    with kpi_col1:
+        st.metric(label="Total Cost Saving", value=f"${true_net_benefit:,.0f}")
+
+    with kpi_col2:
+        st.metric(label="Optimized Fill Rate", value=f"{simmed_opt_fill_rate * 100:.1f}%")
+
+    with kpi_col3:
+        st.metric(label="Avg Working Capital (Opt)", value=f"${opt_avg_wc:,.0f}")
+        # Custom HTML to display the historical data in small text right below the metric
+        st.markdown(
+            f"<div style='margin-top: -15px; font-size: 0.85rem; color: gray;'>Historical: ${act_avg_wc:,.0f}</div>", 
+            unsafe_allow_html=True
+        )
+
+    with kpi_col4:
+        release_label = "Cash Released" if cash_released >= 0 else "Capital Added (Tied Up)"
+        st.metric(label=release_label, value=f"${abs(cash_released):,.0f}")
+
+    st.markdown("---")
+
+    
+    # =========================================================
     # =========================================================
     # --- CLUSTERED EXECUTIVE MATRIX TABLES ---
     # =========================================================
@@ -1614,3 +1650,43 @@ with tab5:
             "Safety Stock Floor (Units)": st.column_config.NumberColumn(format="%d")
         }
     )
+
+
+    
+    # =========================================================
+    # --- NEW: OPTIMIZED POLICY DETAILED LEDGER ---
+    # =========================================================
+    st.markdown("---")
+    with st.expander("📋 View Detailed Optimized Policy Ledger", expanded=False):
+        st.markdown(
+            "A day-by-day breakdown of how the Recommended Optimized Policy handles historical demand, "
+            "including specific order placement triggers and stockout mitigation."
+        )
+        
+        optimized_ledger_df = pd.DataFrame({
+            "Date": df["Date"].dt.strftime('%Y-%m-%d'),
+            "Historical Demand (Units)": df["Demand_Qty"].astype(int),
+            "Optimized Orders Placed (Units)": np.array(policy_orders_series).astype(int),
+            "Optimized Closing Balance (Units)": np.array(inv_levels_opt).astype(int),
+            "Optimized Lost Sales (Units)": np.array(lost_sales_series_opt).astype(int)
+        })
+        
+        st.dataframe(
+            optimized_ledger_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                "Historical Demand (Units)": st.column_config.NumberColumn(format="%d"),
+                "Optimized Orders Placed (Units)": st.column_config.NumberColumn(format="%d"),
+                "Optimized Closing Balance (Units)": st.column_config.NumberColumn(format="%d"),
+                "Optimized Lost Sales (Units)": st.column_config.NumberColumn(format="%d")
+            }
+        )
+        
+        st.download_button(
+            label="📥 Download Optimized Policy Ledger (CSV)", 
+            data=optimized_ledger_df.to_csv(index=False).encode('utf-8'), 
+            file_name="optimized_inventory_ledger.csv", 
+            mime="text/csv"
+        )
