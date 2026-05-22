@@ -1227,11 +1227,10 @@ with tab5:
             }
         )
 
-    # --- STEP 4: ADVANCED STATISTICAL FIT RUNNER ---
+# --- STEP 4: ADVANCED STATISTICAL FIT RUNNER ---
     std_daily_demand = df["Demand_Qty"].std()
     annual_demand = avg_daily_demand_calc * 365
     
-    # UPDATED CALCULATION: Convert the new daily rate into the engine's standard annual basis
     annual_fixed_holding_per_unit = holding_fixed_daily * 365
     unit_holding_cost = annual_fixed_holding_per_unit + (item_unit_cost * holding_var_pct)
     
@@ -1243,28 +1242,38 @@ with tab5:
     risk_std = np.std(rolling_risk_demand) if len(rolling_risk_demand) > 0 else 0
 
     if len(rolling_risk_demand) > 0:
-        empirical_rop_raw = np.percentile(rolling_risk_demand, service_level * 100)
-        log_params = stats.lognorm.fit(rolling_risk_demand, floc=0)
-        gam_params = stats.gamma.fit(rolling_risk_demand, floc=0)
-
-        counts, bins = np.histogram(rolling_risk_demand, bins=20, density=True)
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        rss_norm = np.sum((counts - stats.norm.pdf(bin_centers, loc=risk_mean, scale=risk_std)) ** 2)
-        rss_log = np.sum((counts - stats.lognorm.pdf(bin_centers, *log_params)) ** 2)
-        rss_gam = np.sum((counts - stats.gamma.pdf(bin_centers, *gam_params)) ** 2)
-
-        if cov > 0.75:
-            best_fit_name = "Empirical (Data-Driven)"
-            raw_target_level = empirical_rop_raw
+        if np.max(rolling_risk_demand) <= 0:
+            # Safety net: If there is literally 0 demand across the entire dataset
+            best_fit_name = "Zero Demand Base"
+            raw_target_level = 0.0
         else:
-            errors = {"Normal": rss_norm, "Log-Normal": rss_log, "Gamma": rss_gam}
-            best_fit_name = min(errors, key=errors.get)
-            if best_fit_name == "Normal":
-                raw_target_level = stats.norm.ppf(service_level, loc=risk_mean, scale=risk_std)
-            elif best_fit_name == "Log-Normal":
-                raw_target_level = stats.lognorm.ppf(service_level, *log_params)
+            empirical_rop_raw = np.percentile(rolling_risk_demand, service_level * 100)
+            
+            # CRITICAL FIX: Epsilon smoothing to prevent SciPy FitDataError on exact 0s
+            safe_demand = np.where(rolling_risk_demand <= 0, 1e-5, rolling_risk_demand)
+            
+            log_params = stats.lognorm.fit(safe_demand, floc=0)
+            gam_params = stats.gamma.fit(safe_demand, floc=0)
+
+            counts, bins = np.histogram(rolling_risk_demand, bins=20, density=True)
+            bin_centers = (bins[:-1] + bins[1:]) / 2
+            
+            rss_norm = np.sum((counts - stats.norm.pdf(bin_centers, loc=risk_mean, scale=risk_std)) ** 2)
+            rss_log = np.sum((counts - stats.lognorm.pdf(bin_centers, *log_params)) ** 2)
+            rss_gam = np.sum((counts - stats.gamma.pdf(bin_centers, *gam_params)) ** 2)
+
+            if cov > 0.75:
+                best_fit_name = "Empirical (Data-Driven)"
+                raw_target_level = empirical_rop_raw
             else:
-                raw_target_level = stats.gamma.ppf(service_level, *gam_params)
+                errors = {"Normal": rss_norm, "Log-Normal": rss_log, "Gamma": rss_gam}
+                best_fit_name = min(errors, key=errors.get)
+                if best_fit_name == "Normal":
+                    raw_target_level = stats.norm.ppf(service_level, loc=risk_mean, scale=risk_std)
+                elif best_fit_name == "Log-Normal":
+                    raw_target_level = stats.lognorm.ppf(service_level, *log_params)
+                else:
+                    raw_target_level = stats.gamma.ppf(service_level, *gam_params)
     else:
         best_fit_name = "Default (Insufficient Data)"
         raw_target_level = avg_daily_demand_calc * risk_horizon_days
@@ -1276,6 +1285,7 @@ with tab5:
     if "rop_audit_suite" not in st.session_state:
         st.session_state.rop_audit_suite = max(0, int(raw_target_level))
 
+    
     # --- HISTOGRAM EXPANDER ---
     with st.expander("📊 View Cleaned Demand Distribution & Best-Fit Curve Metrics", expanded=False):
         stat_col1, stat_col2, stat_col3 = st.columns(3)
