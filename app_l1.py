@@ -18,7 +18,7 @@ st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
 st.title("🚀 Supply Chain Analytics Platform")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "Demand Simulator Game", "Inventory Audit"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "Demand Simulator Game", "Age Analysis", "Inventory Audit"])
 
 with tab1:
     st.header("The Basic Thumb Rule Used For Inventory Planning")
@@ -1063,12 +1063,304 @@ with tab4:
 
 
 
-
-
-
-
-
 with tab5:
+    st.header("Age Analysis")
+    st.markdown("Upload your daily inventory transaction data to generate the aging dashboard.")
+    
+    # 1. FILE UPLOADER 
+    uploaded_file = st.file_uploader(
+        "Upload Inventory Data (CSV or Excel)", 
+        type=['csv', 'xlsx'],
+        key="tab5_uploader" 
+    )
+    
+    # 2. LOCAL FUNCTION DEFINITION 
+    def calculate_fifo_aging(df, initial_age_assumption, bucket_cutoffs, bucket_labels):
+        """
+        Calculates average inventory age and dynamic aging buckets using FIFO.
+        """
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date')
+        
+        # Resample to fill missing dates with 0
+        df = df.set_index('Date').resample('D').asfreq().fillna(0).reset_index()
+        
+        inventory_queue = []
+        daily_records = []
+        
+        for index, row in df.iterrows():
+            current_date = row['Date']
+            
+            # Handle Day 1 Opening Balance
+            if index == 0 and row['Opening Balance'] > 0:
+                inventory_queue.append({
+                    'received_date': current_date - pd.Timedelta(days=initial_age_assumption),
+                    'qty': row['Opening Balance']
+                })
+                
+            # Add newly received stock to the queue 
+            if row['Receiving'] > 0:
+                inventory_queue.append({
+                    'received_date': current_date,
+                    'qty': row['Receiving']
+                })
+                
+            # Process Demand (FIFO: Consume oldest stock first) 
+            demand_remaining = row['Demand/Sales']
+            while demand_remaining > 0 and len(inventory_queue) > 0:
+                oldest_batch = inventory_queue[0]
+                if oldest_batch['qty'] <= demand_remaining:
+                    demand_remaining -= oldest_batch['qty']
+                    inventory_queue.pop(0) 
+                else:
+                    oldest_batch['qty'] -= demand_remaining
+                    demand_remaining = 0 
+                    
+            # Calculate daily metrics
+            total_qty = 0
+            weighted_age_sum = 0
+            
+            # Initialize dynamic buckets for the day
+            buckets = {label: 0 for label in bucket_labels}
+            
+            for batch in inventory_queue:
+                qty = batch['qty']
+                age_days = (current_date - batch['received_date']).days
+                
+                total_qty += qty
+                weighted_age_sum += (qty * age_days)
+                
+                # Sort into dynamic user-defined buckets
+                placed = False
+                for i, cutoff in enumerate(bucket_cutoffs):
+                    if age_days <= cutoff:
+                        buckets[bucket_labels[i]] += qty
+                        placed = True
+                        break
+                if not placed:
+                    buckets[bucket_labels[-1]] += qty
+                    
+            avg_age = weighted_age_sum / total_qty if total_qty > 0 else 0
+            
+            # Save the record for this day
+            record = {
+                'Date': current_date,
+                'Calculated Closing Balance': total_qty,
+                'Average Age': avg_age,
+                'Receiving': row['Receiving'],
+                'Demand/Sales': row['Demand/Sales']
+            }
+            record.update(buckets)
+            daily_records.append(record)
+            
+        return pd.DataFrame(daily_records)
+
+    # 3. DASHBOARD LOGIC 
+    if uploaded_file is not None:
+        try:
+            # Read the file
+            if uploaded_file.name.endswith('.csv'):
+                raw_data = pd.read_csv(uploaded_file)
+            elif uploaded_file.name.endswith('.xlsx'):
+                raw_data = pd.read_excel(uploaded_file)
+            
+            # Clean up headers
+            raw_data.columns = raw_data.columns.str.strip()
+
+            st.success("Data loaded successfully!")
+            st.divider()
+
+            # User Inputs for Parameters
+            col_param1, col_param2, col_param3 = st.columns(3)
+            with col_param1:
+                initial_age = st.slider("Assumed Age of Initial Opening Balance (Days)", 0, 120, 90, 10)
+            with col_param2:
+                critical_level = st.number_input("Critical Inventory Level", min_value=0, value=1000, step=100)
+            with col_param3:
+                # Dynamic Bucket Input
+                bucket_str = st.text_input("Age Buckets (comma-separated days)", value="30, 60, 90")
+                try:
+                    custom_buckets = sorted([int(x.strip()) for x in bucket_str.split(',')])
+                except:
+                    st.warning("Invalid bucket format. Defaulting to 30, 60, 90.")
+                    custom_buckets = [30, 60, 90]
+            
+            # Generate Bucket Labels Dynamically
+            labels = []
+            prev = 0
+            for b in custom_buckets:
+                labels.append(f"{prev}-{b}")
+                prev = b + 1
+            labels.append(f"{prev}+")
+                
+            # Process the uploaded data
+            aging_df = calculate_fifo_aging(
+                raw_data, 
+                initial_age_assumption=initial_age,
+                bucket_cutoffs=custom_buckets,
+                bucket_labels=labels
+            )
+            
+            # --- KPI DASHBOARD ---
+            st.markdown("### Key Performance Indicators")
+            current_balance = aging_df.iloc[-1]['Calculated Closing Balance']
+            current_avg_age = aging_df.iloc[-1]['Average Age']
+            
+            total_days = len(aging_df)
+            days_below_critical = len(aging_df[aging_df['Calculated Closing Balance'] < critical_level])
+            pct_below_critical = (days_below_critical / total_days) * 100 if total_days > 0 else 0
+            
+            kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+            kpi_col1.metric("Current Inventory Balance", f"{current_balance:,.0f} units")
+            kpi_col2.metric("Current Average Age", f"{current_avg_age:.1f} Days")
+            kpi_col3.metric("Time Below Critical Level", f"{pct_below_critical:.1f}%", help=f"Percentage of days inventory dropped below {critical_level}")
+            
+            st.divider()
+
+            # --- % OF MATERIAL BY AGE (DATE SELECTOR) ---
+            st.markdown("### % of Material by Age")
+            
+            max_date = aging_df['Date'].max().date()
+            min_date = aging_df['Date'].min().date()
+            
+            selected_date = st.date_input(
+                "Select a specific date to view inventory breakdown:", 
+                value=max_date, 
+                min_value=min_date, 
+                max_value=max_date
+            )
+            
+            target_date_df = aging_df[aging_df['Date'] == pd.to_datetime(selected_date)]
+            
+            if not target_date_df.empty:
+                date_data = target_date_df.iloc[0]
+                total_inv_on_date = date_data['Calculated Closing Balance']
+                
+                if total_inv_on_date > 0:
+                    pct_cols = st.columns(len(labels))
+                    for i, label in enumerate(labels):
+                        qty_in_bucket = date_data[label]
+                        pct_of_total = (qty_in_bucket / total_inv_on_date) * 100
+                        
+                        pct_cols[i].metric(
+                            label=f"Bucket: {label} Days", 
+                            value=f"{pct_of_total:.1f}%", 
+                            delta=f"{qty_in_bucket:,.0f} units", 
+                            delta_color="off"
+                        )
+                else:
+                    st.info(f"Inventory balance was zero on {selected_date}.")
+            else:
+                st.warning("No data available for the selected date.")
+
+            st.divider()
+            
+            # --- CHART 1: AVERAGE AGE + TRANSACTIONS (DUAL AXIS) ---
+            st.subheader("Inventory Age & Daily Transactions")
+            
+            aging_df['Negative_Sales'] = aging_df['Demand/Sales'] * -1
+            
+            fig_age_tx = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # SOOTHING PALETTE: Sage Green & Muted Coral
+            fig_age_tx.add_trace(
+                go.Bar(x=aging_df['Date'], y=aging_df['Receiving'], name='Purchases (Inbound)', marker_color='#81b29a', opacity=0.85, marker_line_width=0),
+                secondary_y=False
+            )
+            fig_age_tx.add_trace(
+                go.Bar(x=aging_df['Date'], y=aging_df['Negative_Sales'], name='Sales (Outbound)', marker_color='#e07a5f', opacity=0.85, marker_line_width=0),
+                secondary_y=False
+            )
+            fig_age_tx.add_trace(
+                go.Scatter(x=aging_df['Date'], y=aging_df['Average Age'], name='Average Age', mode='lines', line=dict(color='#3d5a80', width=3)),
+                secondary_y=True
+            )
+            
+            fig_age_tx.update_layout(
+                template="plotly_white", 
+                barmode='relative', 
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(t=40)
+            )
+            # Remove harsh gridlines
+            fig_age_tx.update_yaxes(title_text="Transaction Volume (Units)", secondary_y=False, showgrid=True, gridcolor='#f0f0f0')
+            fig_age_tx.update_yaxes(title_text="Average Age (Days)", secondary_y=True, showgrid=False)
+            fig_age_tx.update_xaxes(showgrid=False)
+            st.plotly_chart(fig_age_tx, use_container_width=True)
+            
+            # --- CHART 2: AGING BUCKETS (STRICT CURATED PALETTE) ---
+            st.subheader("Aging Buckets")
+            
+            # Curated 8-step palette specifically stretching from your Navy to your Orange smoothly
+            curated_palette = ['#003f5c', '#2f4b7c', '#665191', '#a05195', '#d45087', '#f95d6a', '#ff7c43', '#ffa600']
+            
+            # Pick colors evenly from the curated palette based on how many buckets the user chose
+            if len(labels) == 4:
+                custom_colors = ['#003f5c', '#7a5195', '#ef5675', '#ffa600'] # Exact 4 requested
+            else:
+                indices = np.linspace(0, len(curated_palette) - 1, len(labels), dtype=int)
+                custom_colors = [curated_palette[i] for i in indices]
+            
+            color_mapping = {label: color for label, color in zip(labels, custom_colors)}
+            stack_order = labels[::-1] # Oldest at the bottom
+            
+            fig_buckets = px.bar(
+                aging_df, 
+                x='Date', 
+                y=stack_order,
+                color_discrete_map=color_mapping 
+            )
+            
+            fig_buckets.update_traces(marker_line_width=0)
+            fig_buckets.update_layout(
+                template="plotly_white", 
+                barmode='stack', 
+                yaxis_title="Units in Stock", 
+                xaxis_title="",
+                legend_title="Age (Days)",
+                legend_traceorder="reversed"
+            )
+            fig_buckets.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
+            fig_buckets.update_xaxes(showgrid=False)
+            st.plotly_chart(fig_buckets, use_container_width=True)
+
+            # --- CHART 3: INVENTORY GRAPH ---
+            st.subheader("Total Inventory Trace")
+            fig_inv = px.area(
+                aging_df,
+                x='Date',
+                y='Calculated Closing Balance',
+                color_discrete_sequence=['#003f5c']
+            )
+            
+            fig_inv.update_traces(line=dict(width=0))
+            fig_inv.update_layout(
+                template="plotly_white", 
+                yaxis_title="Total Units On Hand", 
+                xaxis_title=""
+            )
+            fig_inv.add_hline(y=critical_level, line_dash="dot", annotation_text="Critical Level", line_color="#ef5675")
+            fig_inv.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
+            fig_inv.update_xaxes(showgrid=False)
+            st.plotly_chart(fig_inv, use_container_width=True)
+
+            with st.expander("View Daily Aging Data"):
+                st.dataframe(aging_df)
+
+        except KeyError as ke:
+            st.error(f"Missing a required column: {ke}. Please ensure your file has 'Date', 'Opening Balance', 'Demand/Sales', and 'Receiving'.")
+        except Exception as e:
+            st.error(f"Error processing the file. Details: {e}")
+            
+    else:
+        st.info("Awaiting file upload...")
+
+
+
+
+
+with tab6:
     st.header("⚖️ Advanced Inventory Optimization Suite")
     st.markdown(
         "Analyze your inventory data through a twin-lens framework. First, review a historical backtest audit "
