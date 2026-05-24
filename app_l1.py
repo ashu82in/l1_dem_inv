@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 from prophet import Prophet
 from scipy.stats import norm
 import scipy.stats as stats
+from plotly.subplots import make_subplots
+import plotly.colors as pc
 
 # --- Session State Initialization ---
 if 'next_clicked' not in st.session_state:
