@@ -1655,6 +1655,8 @@ with tab6:
                         st.dataframe(full_stock_card_df, use_container_width=True, hide_index=True, column_config={"Opening Balance": st.column_config.NumberColumn(format="%d"), "Cleaned Demand Volume (Units)": st.column_config.NumberColumn(format="%d"), "Consolidated Stock Received (Units)": st.column_config.NumberColumn(format="%d"), "Closing Balance": st.column_config.NumberColumn(format="%d")})
 
                     # --- STEP 4: ADVANCED STATISTICAL FIT RUNNER ---
+                    st.subheader("4. Statistical Risk & Distribution Engines")
+                    
                     annual_demand = avg_daily_demand_calc * 365
                     annual_fixed_holding_per_unit = holding_fixed_daily * 365
                     unit_holding_cost = annual_fixed_holding_per_unit + (item_unit_cost * holding_var_pct)
@@ -1716,83 +1718,112 @@ with tab6:
                         hist_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Demand Quantity (Units / Day)", yaxis_title="Frequency", margin=dict(l=40, r=40, t=10, b=40), height=300)
                         st.plotly_chart(hist_fig, use_container_width=True)
 
-
                     # ==========================================
                     #      SECTION C: ERRATIC DEMAND PROFILER
                     # ==========================================
                     st.markdown("---")
-                    st.header("🌪️ Section C: Erratic Demand & Empirical ROP Profiler")
+                    st.subheader("5. 🌪️ Erratic Demand & Empirical ROP Profiler")
                     
-                    with st.expander("🔍 Open Erratic Demand & Rolling Window Profiler", expanded=False):
+                    with st.expander("Open Rolling Window & Empirical Profiler", expanded=False):
                         st.markdown(
                             "Standard safety stock math assumes demand follows a predictable bell curve. For erratic or lumpy demand, "
                             "that assumption breaks down. This tool mechanically profiles your exact historical risk by analyzing every "
-                            "rolling lead-time window in your dataset."
+                            "rolling vulnerability window in your dataset."
                         )
                         
-                        col_emp1, col_emp2, col_emp3 = st.columns(3)
+                        tab_emp_cont, tab_emp_per = st.tabs(["📉 Continuous Review (ROP)", "⏳ Periodic Review (Target Level)"])
                         
-                        with col_emp1:
-                            emp_lt_window = st.number_input("Rolling Window (Lead Time Days)", min_value=1, value=int(lead_time_days), step=1, key="emp_lt_window")
-                        with col_emp2:
-                            emp_test_rop = st.number_input("Test Reorder Point (ROP)", min_value=0, value=int(raw_target_level), step=10, key="emp_test_rop")
-                        with col_emp3:
-                            emp_target_sl = st.number_input("Target Service Level (%)", min_value=1.0, max_value=99.9, value=95.0, step=0.5, key="emp_target_sl")
+                        with tab_emp_cont:
+                            st.markdown("##### Continuous Review Risk Profiler")
+                            st.write("In a Continuous system, you reorder immediately when you hit a threshold. Your vulnerability window is simply the **Lead Time**.")
+                            
+                            col_emp1, col_emp2, col_emp3 = st.columns(3)
+                            
+                            with col_emp1:
+                                emp_lt_window = st.number_input("Lead Time (Days)", min_value=1, value=int(lead_time_days), step=1, key="emp_lt_window")
+                            with col_emp2:
+                                emp_test_rop = st.number_input("Test Reorder Point (ROP)", min_value=0, value=int(raw_target_level), step=10, key="emp_test_rop")
+                            with col_emp3:
+                                emp_target_sl = st.number_input("Target Service Level (%)", min_value=1.0, max_value=99.9, value=95.0, step=0.5, key="emp_target_sl")
 
-                        # --- Mechanical Empirical Calculations ---
-                        # Calculate the rolling sum of demand for the given window size
-                        rolling_demand = df["Demand_Qty"].rolling(window=emp_lt_window).sum().dropna()
+                            rolling_demand_c = df["Demand_Qty"].rolling(window=emp_lt_window).sum().dropna()
 
-                        if len(rolling_demand) > 0:
-                            # 1. Test ROP Performance
-                            windows_below_rop = np.sum(rolling_demand <= emp_test_rop)
-                            total_windows = len(rolling_demand)
-                            achieved_sl = (windows_below_rop / total_windows) * 100
+                            if len(rolling_demand_c) > 0:
+                                windows_below_rop = np.sum(rolling_demand_c <= emp_test_rop)
+                                total_windows_c = len(rolling_demand_c)
+                                achieved_sl_c = (windows_below_rop / total_windows_c) * 100
+                                required_rop = np.percentile(rolling_demand_c, emp_target_sl)
 
-                            # 2. Required ROP for Target SL (Empirical Percentile)
-                            required_rop = np.percentile(rolling_demand, emp_target_sl)
+                                res_col1, res_col2 = st.columns(2)
+                                with res_col1:
+                                    st.info(f"**Testing ROP of {emp_test_rop:,}:**\n\nOut of {total_windows_c:,} historical {emp_lt_window}-day windows, the total demand was successfully covered by {emp_test_rop:,} units exactly **{windows_below_rop:,} times**. This yields an empirical service level of **{achieved_sl_c:.1f}%**.")
+                                with res_col2:
+                                    st.success(f"**Targeting {emp_target_sl}% Service Level:**\n\nTo mechanically guarantee that you don't stock out in {emp_target_sl}% of all historical {emp_lt_window}-day scenarios, your ROP must be set to the empirical percentile: **{int(required_rop):,} units**.")
 
-                            # --- Display Results ---
-                            st.markdown("##### 📊 Empirical Risk Analysis")
-                            res_col1, res_col2 = st.columns(2)
+                                emp_fig_c = go.Figure()
+                                emp_fig_c.add_trace(go.Histogram(x=rolling_demand_c, nbinsx=40, marker_color='#B0C4DE', name=f"Historical {emp_lt_window}-Day Windows"))
+                                emp_fig_c.add_vline(x=emp_test_rop, line_width=2, line_dash="dash", line_color="#FF4B4B", annotation_text=f"Tested ROP ({emp_test_rop})", annotation_position="top right")
+                                emp_fig_c.add_vline(x=required_rop, line_width=2, line_dash="dash", line_color="#1F77B4", annotation_text=f"Target ROP ({int(required_rop)})", annotation_position="top left")
 
-                            with res_col1:
-                                st.info(f"**Testing ROP of {emp_test_rop:,}:**\n\nOut of {total_windows:,} historical {emp_lt_window}-day windows, the total demand was successfully covered by {emp_test_rop:,} units exactly **{windows_below_rop:,} times**. This yields an empirical service level of **{achieved_sl:.1f}%**.")
+                                emp_fig_c.update_layout(
+                                    title=f"Actual Demand Distribution Across All {emp_lt_window}-Day Windows",
+                                    xaxis_title=f"Total Units Demanded in a {emp_lt_window}-Day Window",
+                                    yaxis_title="Frequency", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, margin=dict(t=40, b=40)
+                                )
+                                st.plotly_chart(emp_fig_c, use_container_width=True)
+                            else:
+                                st.warning(f"⚠️ Not enough data to calculate rolling windows for a {emp_lt_window}-day lead time.")
 
-                            with res_col2:
-                                st.success(f"**Targeting {emp_target_sl}% Service Level:**\n\nTo mechanically guarantee that you don't stock out in {emp_target_sl}% of all historical {emp_lt_window}-day scenarios, your ROP must be set to the 95th percentile: **{int(required_rop):,} units**.")
+                        with tab_emp_per:
+                            st.markdown("##### Periodic Review Risk Profiler")
+                            st.write("In a Periodic system, you are blind between cycle counts. Your vulnerability window is the **Lead Time + the Review Period**.")
+                            
+                            default_p_val = int(user_p_days) if user_p_days > 1 else 14
+                            default_t_val = int(raw_target_level + (avg_daily_demand_calc * default_p_val))
+                            
+                            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+                            
+                            with p_col1:
+                                emp_p_days = st.number_input("Review Period (P)", min_value=1, value=default_p_val, step=1, key="emp_p_days")
+                            with p_col2:
+                                emp_p_lt = st.number_input("Lead Time (Days)", min_value=1, value=int(lead_time_days), step=1, key="emp_p_lt")
+                            with p_col3:
+                                emp_test_t = st.number_input("Test Target Level (T)", min_value=0, value=default_t_val, step=10, key="emp_test_t")
+                            with p_col4:
+                                emp_target_sl_p = st.number_input("Target Service Level (%)", min_value=1.0, max_value=99.9, value=95.0, step=0.5, key="emp_target_sl_p")
 
-                            # --- Distribution Visualizer ---
-                            emp_fig = go.Figure()
-                            emp_fig.add_trace(go.Histogram(
-                                x=rolling_demand, 
-                                nbinsx=40, 
-                                marker_color='#B0C4DE', 
-                                name=f"Historical {emp_lt_window}-Day Windows"
-                            ))
+                            risk_window_days = emp_p_days + emp_p_lt
+                            rolling_demand_p = df["Demand_Qty"].rolling(window=risk_window_days).sum().dropna()
 
-                            # Vertical lines to visually map the ROP limits
-                            emp_fig.add_vline(x=emp_test_rop, line_width=2, line_dash="dash", line_color="#FF4B4B", annotation_text=f"Tested ROP ({emp_test_rop})", annotation_position="top right")
-                            emp_fig.add_vline(x=required_rop, line_width=2, line_dash="dash", line_color="#1F77B4", annotation_text=f"Target ROP ({int(required_rop)})", annotation_position="top left")
+                            if len(rolling_demand_p) > 0:
+                                windows_below_t = np.sum(rolling_demand_p <= emp_test_t)
+                                total_windows_p = len(rolling_demand_p)
+                                achieved_sl_p = (windows_below_t / total_windows_p) * 100
+                                required_t = np.percentile(rolling_demand_p, emp_target_sl_p)
 
-                            emp_fig.update_layout(
-                                title=f"Actual Demand Distribution Across All {emp_lt_window}-Day Windows",
-                                xaxis_title=f"Total Units Demanded in a {emp_lt_window}-Day Window",
-                                yaxis_title="Frequency (Number of Occurrences)",
-                                paper_bgcolor='rgba(0,0,0,0)', 
-                                plot_bgcolor='rgba(0,0,0,0)', 
-                                height=400,
-                                margin=dict(t=40, b=40)
-                            )
-                            st.plotly_chart(emp_fig, use_container_width=True)
+                                res_col3, res_col4 = st.columns(2)
+                                with res_col3:
+                                    st.info(f"**Testing Target (T) of {emp_test_t:,}:**\n\nOut of {total_windows_p:,} historical {risk_window_days}-day windows (P+L), demand was successfully covered by {emp_test_t:,} units exactly **{windows_below_t:,} times**. Empirical SL: **{achieved_sl_p:.1f}%**.")
+                                with res_col4:
+                                    st.success(f"**Targeting {emp_target_sl_p}% Service Level:**\n\nTo mechanically guarantee that you don't stock out in {emp_target_sl_p}% of all historical {risk_window_days}-day scenarios, your Target Level must be: **{int(required_t):,} units**.")
 
-                        else:
-                            st.warning(f"⚠️ Not enough data to calculate rolling windows for a {emp_lt_window}-day lead time. Try widening your Analysis Period.")
+                                emp_fig_p = go.Figure()
+                                emp_fig_p.add_trace(go.Histogram(x=rolling_demand_p, nbinsx=40, marker_color='#B0C4DE', name=f"Historical {risk_window_days}-Day Windows"))
+                                emp_fig_p.add_vline(x=emp_test_t, line_width=2, line_dash="dash", line_color="#FF4B4B", annotation_text=f"Tested Target ({emp_test_t})", annotation_position="top right")
+                                emp_fig_p.add_vline(x=required_t, line_width=2, line_dash="dash", line_color="#1F77B4", annotation_text=f"Required Target ({int(required_t)})", annotation_position="top left")
 
+                                emp_fig_p.update_layout(
+                                    title=f"Actual Demand Distribution Across All {risk_window_days}-Day (P+L) Windows",
+                                    xaxis_title=f"Total Units Demanded in a {risk_window_days}-Day Window",
+                                    yaxis_title="Frequency", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, margin=dict(t=40, b=40)
+                                )
+                                st.plotly_chart(emp_fig_p, use_container_width=True)
+                            else:
+                                st.warning(f"⚠️ Not enough data to calculate rolling windows for a {risk_window_days}-day (P+L) window.")
 
-                    
-                    # --- STEP 5: POLICY OPTIMIZATION TUNING CONFIG ---
-                    st.subheader("4. Policy Optimization & Parameter Tuning")
+                    # --- STEP 5: FINAL POLICY OPTIMIZATION TUNING CONFIG ---
+                    st.markdown("---")
+                    st.subheader("6. Final Policy Parameter Tuning")
                     adjust_col1, adjust_col2 = st.columns(2)
                     with adjust_col1:
                         if review_system == "Continuous Review (Q, R)":
@@ -1863,7 +1894,6 @@ with tab6:
                     optimal_lost_sales_financial = lost_sales_qty_opt * lost_sales_penalty
                     optimal_total_cost = optimal_ordering_cost + optimal_holding_cost + optimal_lost_sales_financial
                     
-                    # -> THE FIX: Reinstate Working Capital variables for the matrices
                     act_max_wc = actual_max_inventory * item_unit_cost
                     act_avg_wc = actual_avg_inventory * item_unit_cost
                     act_min_wc = actual_min_inventory * item_unit_cost
@@ -1973,7 +2003,7 @@ with tab6:
                     st.markdown("---")
                     st.header("🔬 Section B: Multi-Scenario Comparative Analysis")
                     st.markdown(
-                        "Leveraging simulation engine, you can now backtest and compare up to 6 "
+                        "Leveraging the high-speed vectorized simulation engine, you can now backtest and compare up to 6 "
                         "different inventory policies simultaneously. By adjusting these mechanical levers, you can easily identify "
                         "operational blind spots without manually tracking the math."
                     )
@@ -2035,7 +2065,7 @@ with tab6:
                         create_per_box(p3, 3, 30)
 
                     st.markdown("---")
-
+                    
                     if st.button("🚀 Compare Scenarios", type="primary", use_container_width=True):
                         if not active_scenarios_list:
                             st.warning("Please toggle 'Include' for at least one scenario above to generate the comparison.")
@@ -2043,13 +2073,12 @@ with tab6:
                             summary_data = []
                             comp_fig = go.Figure()
                             
-                            # Add historical actuals to the chart as a visual baseline
                             comp_fig.add_trace(go.Scatter(
                                 x=df["Date"], y=inv_levels_act, mode='lines', 
                                 name="Historical Actuals", line=dict(color='rgba(176, 196, 222, 0.4)', width=2, dash='dot')
                             ))
 
-                            # --- NEW: INJECT HISTORICAL ACTUALS INTO THE TABLE ---
+                            # Add baseline to the summary data
                             summary_data.append({
                                 "Scenario Blueprint": "📊 Historical Actuals (Baseline)",
                                 "Total Op Cost ($)": actual_total_cost,
@@ -2067,7 +2096,6 @@ with tab6:
                                 val1 = scenario["P1"]
                                 val2 = scenario["P2"]
                                 
-                                # Process through the C-level compiled arrays
                                 s_inv, s_lost, s_orders = fast_simulate_inventory(
                                     demand_arr_main, purchase_arr_main, opening_stock_override, 
                                     lead_time_days, p_type, val1, val2
@@ -2095,11 +2123,9 @@ with tab6:
                                     name=case_name, line=dict(color=color_palette[index % len(color_palette)], width=2.5)
                                 ))
 
-                            # Render the clean comparative scorecard
                             st.markdown("##### 🏆 Comparative Outcomes Scorecard")
                             comp_df = pd.DataFrame(summary_data)
                             
-                            # Highlight the baseline row so it stands out
                             def highlight_baseline(s):
                                 return ['background-color: rgba(176, 196, 222, 0.15)' if s['Scenario Blueprint'] == "📊 Historical Actuals (Baseline)" else '' for v in s]
 
@@ -2116,7 +2142,6 @@ with tab6:
                                 }
                             )
                             
-                            # Render the Multi-Line Blueprint
                             st.markdown("##### 📈 Strategic Trajectory Matrix")
                             comp_fig.update_layout(
                                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
@@ -2124,3 +2149,4 @@ with tab6:
                                 height=450, legend=dict(orientation="h", y=1.1, x=1, xanchor="right")
                             )
                             st.plotly_chart(comp_fig, use_container_width=True)
+                    
