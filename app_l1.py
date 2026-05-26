@@ -1716,6 +1716,81 @@ with tab6:
                         hist_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Demand Quantity (Units / Day)", yaxis_title="Frequency", margin=dict(l=40, r=40, t=10, b=40), height=300)
                         st.plotly_chart(hist_fig, use_container_width=True)
 
+
+                    # ==========================================
+                    #      SECTION C: ERRATIC DEMAND PROFILER
+                    # ==========================================
+                    st.markdown("---")
+                    st.header("🌪️ Section C: Erratic Demand & Empirical ROP Profiler")
+                    
+                    with st.expander("🔍 Open Erratic Demand & Rolling Window Profiler", expanded=False):
+                        st.markdown(
+                            "Standard safety stock math assumes demand follows a predictable bell curve. For erratic or lumpy demand, "
+                            "that assumption breaks down. This tool mechanically profiles your exact historical risk by analyzing every "
+                            "rolling lead-time window in your dataset."
+                        )
+                        
+                        col_emp1, col_emp2, col_emp3 = st.columns(3)
+                        
+                        with col_emp1:
+                            emp_lt_window = st.number_input("Rolling Window (Lead Time Days)", min_value=1, value=int(lead_time_days), step=1, key="emp_lt_window")
+                        with col_emp2:
+                            emp_test_rop = st.number_input("Test Reorder Point (ROP)", min_value=0, value=int(raw_target_level), step=10, key="emp_test_rop")
+                        with col_emp3:
+                            emp_target_sl = st.number_input("Target Service Level (%)", min_value=1.0, max_value=99.9, value=95.0, step=0.5, key="emp_target_sl")
+
+                        # --- Mechanical Empirical Calculations ---
+                        # Calculate the rolling sum of demand for the given window size
+                        rolling_demand = df["Demand_Qty"].rolling(window=emp_lt_window).sum().dropna()
+
+                        if len(rolling_demand) > 0:
+                            # 1. Test ROP Performance
+                            windows_below_rop = np.sum(rolling_demand <= emp_test_rop)
+                            total_windows = len(rolling_demand)
+                            achieved_sl = (windows_below_rop / total_windows) * 100
+
+                            # 2. Required ROP for Target SL (Empirical Percentile)
+                            required_rop = np.percentile(rolling_demand, emp_target_sl)
+
+                            # --- Display Results ---
+                            st.markdown("##### 📊 Empirical Risk Analysis")
+                            res_col1, res_col2 = st.columns(2)
+
+                            with res_col1:
+                                st.info(f"**Testing ROP of {emp_test_rop:,}:**\n\nOut of {total_windows:,} historical {emp_lt_window}-day windows, the total demand was successfully covered by {emp_test_rop:,} units exactly **{windows_below_rop:,} times**. This yields an empirical service level of **{achieved_sl:.1f}%**.")
+
+                            with res_col2:
+                                st.success(f"**Targeting {emp_target_sl}% Service Level:**\n\nTo mechanically guarantee that you don't stock out in {emp_target_sl}% of all historical {emp_lt_window}-day scenarios, your ROP must be set to the 95th percentile: **{int(required_rop):,} units**.")
+
+                            # --- Distribution Visualizer ---
+                            emp_fig = go.Figure()
+                            emp_fig.add_trace(go.Histogram(
+                                x=rolling_demand, 
+                                nbinsx=40, 
+                                marker_color='#B0C4DE', 
+                                name=f"Historical {emp_lt_window}-Day Windows"
+                            ))
+
+                            # Vertical lines to visually map the ROP limits
+                            emp_fig.add_vline(x=emp_test_rop, line_width=2, line_dash="dash", line_color="#FF4B4B", annotation_text=f"Tested ROP ({emp_test_rop})", annotation_position="top right")
+                            emp_fig.add_vline(x=required_rop, line_width=2, line_dash="dash", line_color="#1F77B4", annotation_text=f"Target ROP ({int(required_rop)})", annotation_position="top left")
+
+                            emp_fig.update_layout(
+                                title=f"Actual Demand Distribution Across All {emp_lt_window}-Day Windows",
+                                xaxis_title=f"Total Units Demanded in a {emp_lt_window}-Day Window",
+                                yaxis_title="Frequency (Number of Occurrences)",
+                                paper_bgcolor='rgba(0,0,0,0)', 
+                                plot_bgcolor='rgba(0,0,0,0)', 
+                                height=400,
+                                margin=dict(t=40, b=40)
+                            )
+                            st.plotly_chart(emp_fig, use_container_width=True)
+
+                        else:
+                            st.warning(f"⚠️ Not enough data to calculate rolling windows for a {emp_lt_window}-day lead time. Try widening your Analysis Period.")
+
+
+                    
                     # --- STEP 5: POLICY OPTIMIZATION TUNING CONFIG ---
                     st.subheader("4. Policy Optimization & Parameter Tuning")
                     adjust_col1, adjust_col2 = st.columns(2)
