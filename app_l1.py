@@ -1429,7 +1429,7 @@ with tab6:
         ordering_cost = st.number_input("Ordering Cost ($/order)", min_value=0.1, value=75.0, step=5.0, key="order_cost_global")
         
     with col3:
-        lost_sales_penalty = st.number_input("Lost Sales Penalty ($/Unit Lost)", min_value=0.0, value=10.0, step=1.0, key="penalty_global")
+        lost_sales_penalty = st.number_input("Lost Sales Penalty ($/Unit Lost)", min_value=0.0, value=0.0, step=1.0, key="penalty_global")
         lead_time_days = st.number_input("Lead Time (Days)", min_value=1, value=14, step=1, key="lt_global")
 
     st.markdown("---")
