@@ -139,7 +139,6 @@ with game_tab:
                 st.info("**Break Even!** You made back exactly what you spent. ⚖️")
 
 
-
 with tab1:
     st.header("The Basic Thumb Rule Used For Inventory Planning")
     
