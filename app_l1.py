@@ -94,7 +94,7 @@ with game_tab:
             # Build DataFrame quickly from NumPy arrays
             df = pd.DataFrame({
                 "Chance #": np.arange(1, chances + 1),
-                "Drawn Balls": [str(list(row)) for row in drawn_matrix], # String formatting needs a quick loop
+                "Drawn Balls": [str(tuple(row.tolist())) for row in drawn_matrix], # String formatting needs a quick loop
                 "Sum of Balls": sums_array,
                 "Win?": np.where(wins_array, "✅ Yes", "❌ No"),
                 "Payout ($)": payouts_array
